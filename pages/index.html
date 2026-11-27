@@ -277,6 +277,288 @@
   // =========================================================================
   // 2. LIVE PUBLIC API FETCHERS (OKX, Coinbase, EastMoney, DefiLlama, ER-API)
   // =========================================================================
+  const OKX_SPOT_CATALOG = []; // Populated live from OKX (500+ USDT pairs)
+  const SEARCH_CACHE = new Map();
+
+  function fetchJsonp(url, cbParam = 'cb', timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+      const cbName = `__ot_cb_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      const script = document.createElement('script');
+      const sep = url.includes('?') ? '&' : '?';
+      let done = false;
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        delete window[cbName];
+        script.remove();
+      };
+      const timer = setTimeout(() => { cleanup(); reject(new Error('JSONP timeout')); }, timeoutMs);
+      window[cbName] = (data) => { clearTimeout(timer); cleanup(); resolve(data); };
+      script.onerror = () => { clearTimeout(timer); cleanup(); reject(new Error('JSONP load error')); };
+      script.src = `${url}${sep}${cbParam}=${cbName}`;
+      document.head.appendChild(script);
+    });
+  }
+
+  // Load real-time Market Cap, P/E, P/B, Turnover Rate, 52W High/Low, and Exact 涨停/跌停 via Tencent Finance JS
+  function fetchTencentLiveSnapshot(inst) {
+    return new Promise((resolve) => {
+      let qCode = null;
+      if (inst.market === 'CN_ASHARE') {
+        const prefix = inst.symbol.startsWith('6') ? 'sh' : (inst.symbol.startsWith('920') || inst.symbol.startsWith('43') || inst.symbol.startsWith('83') || inst.symbol.startsWith('87')) ? 'bj' : 'sz';
+        qCode = `${prefix}${inst.symbol}`;
+      } else if (inst.market === 'US') {
+        qCode = `us${inst.symbol}`;
+      } else if (inst.market === 'HK') {
+        qCode = `hk${inst.symbol.padStart(5, '0')}`;
+      }
+      if (!qCode) { resolve(false); return; }
+
+      const varName = `v_${qCode}`;
+      const script = document.createElement('script');
+      script.charset = 'gbk';
+      const timer = setTimeout(() => { script.remove(); resolve(false); }, 4500);
+      script.onload = () => {
+        clearTimeout(timer);
+        try {
+          const raw = window[varName];
+          if (typeof raw === 'string' && raw.includes('~')) {
+            const p = raw.split('~');
+            const livePx = Number(p[3]);
+            const prevClose = Number(p[4]);
+            if (livePx > 0 && inst.last) {
+              inst.last.close = livePx;
+              if (prevClose > 0) inst.prevClose = prevClose;
+            }
+            const turnover = Number(p[38]);
+            const pe = Number(p[39]);
+            const mcapYi = Number(p[45]);
+            if (!Number.isNaN(turnover) && turnover > 0) inst.liveTurnoverPct = turnover;
+            if (!Number.isNaN(pe) && pe !== 0) inst.livePe = pe;
+            if (!Number.isNaN(mcapYi) && mcapYi > 0) inst.liveMarketCap = mcapYi * 1e8;
+
+            if (inst.market === 'CN_ASHARE') {
+              const pb = Number(p[46]);
+              const limUp = Number(p[47]);
+              const limDn = Number(p[48]);
+              if (p[1]) inst.localName = p[1];
+              if (!Number.isNaN(pb) && pb > 0) inst.livePb = pb;
+              if (!Number.isNaN(limUp) && limUp > 0) inst.exactLimitUp = limUp;
+              if (!Number.isNaN(limDn) && limDn > 0) inst.exactLimitDown = limDn;
+            } else if (inst.market === 'US') {
+              if (p[46] && p[46].length > 1) inst.name = p[46];
+              if (p[1]) inst.localName = p[1];
+              const h52 = Number(p[48]), l52 = Number(p[49]);
+              if (h52 > 0) inst.high52 = h52;
+              if (l52 > 0) inst.low52 = l52;
+            } else if (inst.market === 'HK') {
+              if (p[1]) inst.localName = p[1];
+            }
+          }
+        } catch {}
+        script.remove();
+        resolve(true);
+      };
+      script.onerror = () => { clearTimeout(timer); script.remove(); resolve(false); };
+      script.src = `https://qt.gtimg.cn/q=${encodeURIComponent(qCode)}`;
+      document.head.appendChild(script);
+    });
+  }
+
+  async function fetchOkxSpotCatalog() {
+    try {
+      const r = await fetch('https://www.okx.com/api/v5/market/tickers?instType=SPOT');
+      const d = await r.json();
+      if (Array.isArray(d?.data)) {
+        OKX_SPOT_CATALOG.length = 0;
+        d.data
+          .filter((t) => t.instId && t.instId.endsWith('-USDT'))
+          .sort((a, b) => Number(b.volCcy24h || 0) - Number(a.volCcy24h || 0))
+          .forEach((t) => {
+            const base = t.instId.split('-')[0];
+            OKX_SPOT_CATALOG.push({
+              base,
+              instId: t.instId,
+              last: Number(t.last || 0),
+              vol24h: Number(t.volCcy24h || 0),
+            });
+          });
+      }
+    } catch {}
+  }
+
+  // Universal Live Global Search across ALL US Stocks, China A-Shares (沪深/北交所), HK Stocks, and 500+ Crypto Pairs!
+  async function searchGlobalSecurities(rawQuery) {
+    const q = rawQuery.trim();
+    if (!q) return [];
+    const cacheKey = q.toUpperCase();
+    if (SEARCH_CACHE.has(cacheKey)) return SEARCH_CACHE.get(cacheKey);
+
+    const results = [];
+    const seen = new Set();
+    const pushUnique = (item) => {
+      if (!seen.has(item.canonicalId)) {
+        seen.add(item.canonicalId);
+        results.push(item);
+      }
+    };
+
+    const qUp = q.toUpperCase();
+    // 1. Fast match against OKX 500+ live crypto spot pairs
+    OKX_SPOT_CATALOG.forEach((c) => {
+      if (results.length >= 6) return;
+      if (c.base === qUp || c.base.startsWith(qUp) || c.instId.startsWith(qUp)) {
+        pushUnique({
+          canonicalId: `CR:SPOT:${c.base}-USD`,
+          symbol: `${c.base}-USD`,
+          name: `${c.base} Spot / Perp (OKX Live $${c.last < 1 ? c.last.toFixed(5) : c.last.toFixed(2)})`,
+          market: 'CRYPTO',
+          badge: 'CRYPTO',
+          cmd: `${c.base}-USD <Crypto> DES`,
+          meta: { okxSpot: c.instId, okxSwap: `${c.base}-USDT-SWAP`, coinbaseId: `${c.base}-USD`, base: c.base },
+        });
+      }
+    });
+
+    // 2. Parallel Universal Live Search: EastMoney (All US + China A-Shares + HK) & CoinGecko (All Crypto Names)
+    const [emData, cgData] = await Promise.all([
+      fetchJsonp(
+        `https://searchapi.eastmoney.com/api/suggest/get?input=${encodeURIComponent(q)}&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=12`,
+        'cb',
+        4500,
+      ).catch(() => null),
+      q.length >= 2
+        ? fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`).then((r) => r.json()).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+    const emList = emData?.QuotationCodeTable?.Data;
+    if (Array.isArray(emList)) {
+      emList.forEach((row) => {
+        const code = String(row.Code || '').trim();
+        const name = String(row.Name || code).trim();
+        const quoteId = String(row.QuoteID || '').trim();
+        const secType = String(row.SecurityTypeName || '');
+        const classify = String(row.Classify || '');
+        if (!code || !quoteId) return;
+
+        if (classify === 'AStock' || ['沪A', '深A', '京A', '科创板', '创业板'].includes(secType)) {
+          const isStar = code.startsWith('688') || code.startsWith('689');
+          const isChiNext = code.startsWith('300') || code.startsWith('301');
+          const isBse = code.startsWith('920') || code.startsWith('43') || code.startsWith('83') || code.startsWith('87');
+          const isSse = quoteId.startsWith('1.');
+          const exch = isBse ? 'BSE' : isSse ? 'SSE' : 'SZSE';
+          pushUnique({
+            canonicalId: `EQ:${exch}:${code}`,
+            symbol: code,
+            name: `${name} (${secType || exch})`,
+            localName: name,
+            market: 'CN_ASHARE',
+            badge: `CN ${exch}`,
+            cmd: `${code} CH <Equity> DES`,
+            meta: { eastmoneySecid: quoteId, exch, isStar, isChiNext, isBse, isSse },
+          });
+        } else if (classify === 'UsStock' || secType === '美股') {
+          pushUnique({
+            canonicalId: `EQ:US:${code.toUpperCase()}`,
+            symbol: code.toUpperCase(),
+            name: `${name} (US ${row.JYS || 'Equity'})`,
+            localName: name,
+            market: 'US',
+            badge: 'US',
+            cmd: `${code.toUpperCase()} US <Equity> DES`,
+            meta: { eastmoneySecid: quoteId, exchange: row.JYS || 'US' },
+          });
+        } else if (classify === 'HK' || secType === '港股') {
+          pushUnique({
+            canonicalId: `EQ:HK:${code}`,
+            symbol: code,
+            name: `${name} (HKEX)`,
+            localName: name,
+            market: 'HK',
+            badge: 'HK',
+            cmd: `${code} HK <Equity> DES`,
+            meta: { eastmoneySecid: quoteId, exchange: 'HKEX' },
+          });
+        }
+      });
+    }
+
+    if (Array.isArray(cgData?.coins)) {
+      cgData.coins.slice(0, 4).forEach((c) => {
+        const base = String(c.symbol || '').toUpperCase();
+        if (!base) return;
+        const okxHit = OKX_SPOT_CATALOG.find((x) => x.base === base);
+        if (okxHit) {
+          pushUnique({
+            canonicalId: `CR:SPOT:${base}-USD`,
+            symbol: `${base}-USD`,
+            name: `${c.name} (#${c.market_cap_rank || '?'} · OKX Live $${okxHit.last < 1 ? okxHit.last.toFixed(5) : okxHit.last.toFixed(2)})`,
+            market: 'CRYPTO',
+            badge: 'CRYPTO',
+            cmd: `${base}-USD <Crypto> DES`,
+            meta: { okxSpot: okxHit.instId, okxSwap: `${base}-USDT-SWAP`, coinbaseId: `${base}-USD`, base },
+          });
+        }
+      });
+    }
+
+    const sliced = results.slice(0, 10);
+    SEARCH_CACHE.set(cacheKey, sliced);
+    return sliced;
+  }
+
+  function registerDynamicSearchHit(hit) {
+    if (INSTRUMENTS[hit.canonicalId]) return INSTRUMENTS[hit.canonicalId];
+    if (hit.market === 'CN_ASHARE') {
+      const { eastmoneySecid, isStar, isChiNext, isBse, isSse } = hit.meta;
+      const limitPct = isBse ? 0.30 : (isStar || isChiNext) ? 0.20 : 0.10;
+      const board = isBse ? 'BSE 北交所 (±30%)' : isStar ? 'SSE STAR (±20%)' : isChiNext ? 'SZSE CHINEXT (±20%)' : isSse ? 'SSE MAIN (±10%)' : 'SZSE MAIN (±10%)';
+      INSTRUMENTS[hit.canonicalId] = {
+        id: hit.canonicalId, symbol: hit.symbol, name: hit.localName || hit.name, localName: hit.localName || '',
+        market: 'CN_ASHARE', assetClass: 'EQUITY', exchange: isBse ? 'XBSE (.BJ)' : isSse ? 'XSHG (.SS)' : 'XSHE (.SZ)',
+        ccy: 'CNY', sector: 'China A-Share', industry: board, settlement: 'T+1 CN Strict', lotSize: isStar ? 200 : 100,
+        limitPct, board, northboundEligible: !isBse, shares: null, beta: 1.0, divYield: 0,
+        eastmoneySecid, desc: `Live China A-Share security ${hit.symbol} (${hit.localName || ''}) loaded dynamically.`,
+        aliases: [hit.symbol, `${hit.symbol} CH`, hit.localName || ''].filter(Boolean), finStd: 'CN_CAS', fy: [],
+        candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
+      };
+    } else if (hit.market === 'CRYPTO') {
+      const { okxSpot, okxSwap, coinbaseId, base } = hit.meta;
+      INSTRUMENTS[hit.canonicalId] = {
+        id: hit.canonicalId, symbol: `${base}-USD`, name: `${base} Spot & Perpetual`, localName: '',
+        market: 'CRYPTO', assetClass: 'CRYPTO', exchange: 'OKX / COINBASE 24/7', ccy: 'USD',
+        sector: 'Digital Assets', industry: 'Spot & Perpetual', settlement: 'T+0 Instant', lotSize: 0.001,
+        limitPct: null, shares: null, beta: 2.0, divYield: 0, okxSpot, okxSwap, coinbaseId,
+        desc: `Live 24/7 digital asset ${base}-USD loaded dynamically from OKX / Coinbase.`,
+        aliases: [base, `${base}-USD`, okxSpot], finStd: 'ONCHAIN_TOKENOMICS', fy: [],
+        crypto: { funding8h: null, oiCoins: null, oiUsd: null, vol24hUsd: null, tvlUsd: null, fundingHistory: [] },
+        candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
+      };
+    } else if (hit.market === 'HK') {
+      INSTRUMENTS[hit.canonicalId] = {
+        id: hit.canonicalId, symbol: hit.symbol, name: hit.localName || hit.name, localName: hit.localName || '',
+        market: 'HK', assetClass: 'EQUITY', exchange: 'HKEX (.HK)', ccy: 'HKD',
+        sector: 'Hong Kong Equity', industry: 'HKEX Main Board', settlement: 'T+2 HK', lotSize: 100,
+        limitPct: null, shares: null, beta: 1.0, divYield: 0, eastmoneySecid: hit.meta.eastmoneySecid,
+        desc: `Live Hong Kong Equity ${hit.symbol} (${hit.localName || ''}) loaded dynamically.`,
+        aliases: [hit.symbol, `${hit.symbol} HK`, hit.localName || ''].filter(Boolean), finStd: 'HKFRS', fy: [],
+        holders13f: [], candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
+      };
+    } else {
+      INSTRUMENTS[hit.canonicalId] = {
+        id: hit.canonicalId, symbol: hit.symbol, name: hit.name, localName: hit.localName || '',
+        market: 'US', assetClass: 'EQUITY', exchange: hit.meta.exchange || 'US', ccy: 'USD',
+        sector: 'US Equity', industry: 'Listed Security', settlement: 'T+1 US', lotSize: 1,
+        limitPct: null, shares: null, beta: 1.1, divYield: 0, eastmoneySecid: hit.meta.eastmoneySecid,
+        desc: `Live US Equity ${hit.symbol} (${hit.name}) loaded dynamically from global market feeds.`,
+        aliases: [hit.symbol, `${hit.symbol} US`, hit.localName || ''].filter(Boolean), finStd: 'US_GAAP', fy: [],
+        holders13f: [], candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
+      };
+    }
+    return INSTRUMENTS[hit.canonicalId];
+  }
+
   async function fetchLiveFX() {
     try {
       const r = await fetch('https://open.er-api.com/v6/latest/USD');
@@ -351,9 +633,10 @@
         inst.prevClose = candles[candles.length - 2].close;
         inst.high52 = Math.max(...candles.map((b) => b.high));
         inst.low52 = Math.min(...candles.map((b) => b.low));
-        inst.liveSource = 'LIVE · EastMoney Market Feed';
+        inst.liveSource = 'LIVE · EastMoney + Tencent';
         inst.liveUpdatedAt = inst.last.date;
         inst.loadError = null;
+        await fetchTencentLiveSnapshot(inst);
         return true;
       } catch (err) {
         inst.loadError = err.message;
@@ -455,6 +738,7 @@
     await Promise.all([
       fetchLiveFX(),
       fetchLiveDefiLlama(),
+      fetchOkxSpotCatalog(),
       ...Object.values(INSTRUMENTS).map((inst) =>
         inst.market === 'CRYPTO' ? fetchCryptoInstrument(inst) : fetchEastMoneyInstrument(inst)
       ),
@@ -581,6 +865,22 @@
       const ok = await fetchEastMoneyInstrument(newInst);
       if (ok) { INSTRUMENTS[id] = newInst; return newInst; }
       return null;
+    }
+    // Universal Live Global Search fallback (matches any company name, Chinese name, US/CN/HK ticker, or Crypto!)
+    const hits = await searchGlobalSecurities(q.replace(/\s+(US|CH|CN|HK)$/i, '').trim());
+    if (hits.length > 0) {
+      let chosen = hits[0];
+      if (mktHint === 'US') chosen = hits.find((h) => h.market === 'US') || hits[0];
+      else if (['CH', 'CN', 'SS', 'SZ', 'BJ'].includes(mktHint)) chosen = hits.find((h) => h.market === 'CN_ASHARE') || hits[0];
+      else if (mktHint === 'HK') chosen = hits.find((h) => h.market === 'HK') || hits[0];
+      else if (raw.toUpperCase().includes('CRYPTO')) chosen = hits.find((h) => h.market === 'CRYPTO') || hits[0];
+
+      const inst = registerDynamicSearchHit(chosen);
+      if (!inst.candles.length) {
+        const ok = inst.market === 'CRYPTO' ? await fetchCryptoInstrument(inst) : await fetchEastMoneyInstrument(inst);
+        if (!ok) return null;
+      }
+      return inst;
     }
     return null;
   }
@@ -945,16 +1245,16 @@
     const chgPct = (chg / inst.prevClose) * 100;
     const pos = chg >= 0;
     const latestFy = inst.fy[inst.fy.length - 1];
-    const mcap = inst.shares ? inst.last.close * inst.shares : null;
-    const pe = (mcap && latestFy?.ni > 0) ? (mcap / latestFy.ni).toFixed(1) + 'x' : '—';
+    const mcap = inst.liveMarketCap || (inst.shares ? inst.last.close * inst.shares : null);
+    const pe = inst.livePe ? `${inst.livePe.toFixed(1)}x` : ((mcap && latestFy?.ni > 0) ? (mcap / latestFy.ni).toFixed(1) + 'x' : '—');
     const ev = (mcap && latestFy) ? mcap + latestFy.debt - latestFy.cash : null;
-    const evEbitda = (ev && latestFy?.ebitda > 0) ? (ev / latestFy.ebitda).toFixed(1) + 'x' : '—';
+    const evEbitda = (ev && latestFy?.ebitda > 0) ? (ev / latestFy.ebitda).toFixed(1) + 'x' : (inst.livePb ? `PB ${inst.livePb.toFixed(2)}x` : '—');
     const rangePct = Math.max(0, Math.min(100, ((inst.last.close - inst.low52) / (inst.high52 - inst.low52 || 1)) * 100));
 
     let microHtml = '';
     if (inst.market === 'CN_ASHARE') {
-      const up = roundCny(inst.prevClose * (1 + inst.limitPct));
-      const dn = roundCny(inst.prevClose * (1 - inst.limitPct));
+      const up = inst.exactLimitUp || roundCny(inst.prevClose * (1 + inst.limitPct));
+      const dn = inst.exactLimitDown || roundCny(inst.prevClose * (1 - inst.limitPct));
       microHtml = `
         <div class="p-2.5 rounded bg-[var(--background)] border border-[var(--border)] space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs mono">
@@ -1344,33 +1644,123 @@
 
   const cmdInput = document.getElementById('cmd-input');
   const dropdown = document.getElementById('cmd-dropdown');
-  function updateDropdown() {
-    const q = cmdInput.value.trim().toUpperCase();
-    const items = [
-      ...Object.values(INSTRUMENTS).map((i) => ({
-        cmd: i.market === 'US' ? `${i.symbol} US <Equity> DES` : i.market === 'CN_ASHARE' ? `${i.symbol} CH <Equity> DES` : `${i.symbol} <Crypto> GP`,
-        detail: `${i.name} ${i.localName} (${i.market})`,
-      })),
-      { cmd: 'TSLA US <Equity> GP', detail: 'Dynamic Live Fetch — Any US Ticker' },
-      { cmd: '000001 CH <Equity> DES', detail: 'Dynamic Live Fetch — Any 6-Digit China A-Share' },
-      { cmd: 'DOGE-USD <Crypto> GP', detail: 'Dynamic Live Fetch — Any Crypto Pair' },
-      { cmd: 'AAPL US, NVDA US, 600519 CH, BTC-USD COMP', detail: 'Live FX-Normalized Peer Comparison' },
-      { cmd: 'FLOW', detail: 'Live China A-Share 涨跌停 Board Monitor' },
-      { cmd: 'PERP', detail: 'Live OKX Funding, OI & DefiLlama TVL' },
-    ].filter((x) => !q || x.cmd.toUpperCase().includes(q) || x.detail.toUpperCase().includes(q)).slice(0, 8);
-    if (!items.length) { dropdown.classList.add('hidden'); return; }
-    dropdown.innerHTML = items.map((x) => `<button type="button" data-ac-cmd="${x.cmd}" class="w-full text-left px-3 py-1.5 hover:bg-[var(--sidebar)] flex items-center justify-between gap-2 text-xs cursor-pointer border-b border-[var(--card-border)]"><span class="mono font-semibold text-[var(--warning)]">${x.cmd}</span><span class="text-[var(--muted-foreground)] truncate">${x.detail}</span></button>`).join('');
+  let acItems = [];
+  let acSelected = 0;
+  let acDebounce = null;
+  let acSeq = 0;
+
+  function renderAcList(loadingText = '') {
+    if (!acItems.length && !loadingText) { dropdown.classList.add('hidden'); return; }
+    const header = `<div class="px-3 py-1 bg-[var(--sidebar)] border-b border-[var(--border)] flex justify-between mono text-xs text-[var(--muted-foreground)]"><span>${loadingText || 'GLOBAL LIVE SEARCH (US · CHINA A-SHARES · HK · 500+ CRYPTO)'}</span><span>↑↓ Select · Enter Run</span></div>`;
+    const rows = acItems.map((x, idx) => `
+      <button type="button" data-ac-idx="${idx}" class="w-full text-left px-3 py-1.5 flex items-center justify-between gap-2 text-xs cursor-pointer border-b border-[var(--card-border)] ${idx === acSelected ? 'bg-[var(--sidebar)]' : 'hover:bg-[var(--sidebar)]'}">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="mono px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--border)] text-[var(--primary)] shrink-0">${x.badge || 'CMD'}</span>
+          <span class="mono font-semibold text-[var(--warning)] shrink-0">${x.cmd}</span>
+          <span class="text-[var(--muted-foreground)] truncate">${x.detail}</span>
+        </div>
+      </button>`).join('');
+    dropdown.innerHTML = header + rows;
     dropdown.classList.remove('hidden');
   }
-  dropdown.addEventListener('mousedown', (e) => { const b = e.target.closest('button'); if (b?.dataset.acCmd) { e.preventDefault(); cmdInput.value = ''; dropdown.classList.add('hidden'); void executeCommand(b.dataset.acCmd); } });
+
+  async function selectAcItem(item) {
+    cmdInput.value = '';
+    dropdown.classList.add('hidden');
+    if (item.searchHit) {
+      const inst = registerDynamicSearchHit(item.searchHit);
+      const pane = state.panes.find((p) => p.id === state.activePaneId) || state.panes[0];
+      pane.instId = inst.id;
+      if (pane.fn === 'PORT' || pane.fn === 'BQL' || pane.fn === 'FLOW') pane.fn = 'DES';
+      if (pane.linkGroup !== 'NONE') state.panes.forEach((p) => { if (p.linkGroup === pane.linkGroup) p.instId = inst.id; });
+      renderWorkspace(); // show loading immediately
+      if (!inst.candles.length) {
+        if (inst.market === 'CRYPTO') await fetchCryptoInstrument(inst);
+        else await fetchEastMoneyInstrument(inst);
+        renderWorkspace();
+      }
+      return;
+    }
+    await executeCommand(item.cmd);
+  }
+
+  function updateDropdown() {
+    const raw = cmdInput.value.trim();
+    const qUp = raw.toUpperCase();
+    const localItems = [
+      ...Object.values(INSTRUMENTS).map((i) => ({
+        badge: i.market === 'CN_ASHARE' ? 'CN' : i.market,
+        cmd: i.market === 'US' ? `${i.symbol} US <Equity> DES` : i.market === 'CN_ASHARE' ? `${i.symbol} CH <Equity> DES` : i.market === 'HK' ? `${i.symbol} HK <Equity> DES` : `${i.symbol} <Crypto> GP`,
+        detail: `${i.name} ${i.localName || ''}`,
+      })),
+      { badge: 'FUNC', cmd: 'FLOW', detail: 'Live China A-Share 涨跌停 Board Monitor' },
+      { badge: 'FUNC', cmd: 'PERP', detail: 'Live OKX Funding, OI & DefiLlama TVL' },
+      { badge: 'FUNC', cmd: 'PORT', detail: 'Multi-Currency Portfolio & VaR Risk Matrix' },
+      { badge: 'FUNC', cmd: 'BQL', detail: 'Live SQL & Python Backtest Console' },
+    ].filter((x) => !qUp || x.cmd.toUpperCase().includes(qUp) || x.detail.toUpperCase().includes(qUp)).slice(0, 6);
+
+    acItems = localItems;
+    acSelected = 0;
+
+    // For any non-empty query, fire debounced live global search across EastMoney + OKX + CoinGecko!
+    if (raw.length >= 1 && !FUNCTIONS.includes(qUp) && !raw.includes(',')) {
+      const searchTerm = raw.replace(/<EQUITY>|<CRYPTO>|<FX>/gi, '').split(/\s+/)[0];
+      renderAcList(`Searching all global markets for "${searchTerm}"...`);
+      clearTimeout(acDebounce);
+      const mySeq = ++acSeq;
+      acDebounce = setTimeout(async () => {
+        const remoteHits = await searchGlobalSecurities(searchTerm);
+        if (mySeq !== acSeq) return;
+        const merged = [];
+        const seenCmd = new Set();
+        remoteHits.forEach((hit) => {
+          const item = { badge: hit.badge, cmd: hit.cmd, detail: hit.name, searchHit: hit };
+          seenCmd.add(hit.cmd);
+          merged.push(item);
+        });
+        localItems.forEach((li) => { if (!seenCmd.has(li.cmd)) merged.push(li); });
+        acItems = merged.slice(0, 10);
+        acSelected = 0;
+        renderAcList(acItems.length ? '' : `No global matches for "${searchTerm}"`);
+      }, 180);
+    } else {
+      clearTimeout(acDebounce);
+      renderAcList();
+    }
+  }
+
+  dropdown.addEventListener('mousedown', (e) => {
+    const b = e.target.closest('button');
+    if (b?.dataset.acIdx !== undefined) {
+      e.preventDefault();
+      const item = acItems[Number(b.dataset.acIdx)];
+      if (item) void selectAcItem(item);
+    }
+  });
   cmdInput.addEventListener('focus', updateDropdown);
   cmdInput.addEventListener('input', updateDropdown);
-  cmdInput.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));
+  cmdInput.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 180));
   cmdInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); const v = cmdInput.value; cmdInput.value = ''; dropdown.classList.add('hidden'); void executeCommand(v); }
-    else if (e.key === 'Escape') { cmdInput.value = ''; dropdown.classList.add('hidden'); cmdInput.blur(); }
-    else if (e.key === 'F2') { e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Equity> `; }
-    else if (e.key === 'F3') { e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Crypto> `; }
+    if (e.key === 'ArrowDown' && acItems.length) {
+      e.preventDefault(); acSelected = (acSelected + 1) % acItems.length; renderAcList();
+    } else if (e.key === 'ArrowUp' && acItems.length) {
+      e.preventDefault(); acSelected = (acSelected - 1 + acItems.length) % acItems.length; renderAcList();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const raw = cmdInput.value.trim();
+      // If user typed a plain search word (like "Tesla" or "比亚迪") and dropdown has a highlighted match, select it directly!
+      if (raw && acItems[acSelected] && !raw.includes(',') && !FUNCTIONS.includes(raw.toUpperCase()) && !raw.includes(' ')) {
+        void selectAcItem(acItems[acSelected]);
+      } else {
+        cmdInput.value = ''; dropdown.classList.add('hidden'); void executeCommand(raw);
+      }
+    } else if (e.key === 'Escape') {
+      cmdInput.value = ''; dropdown.classList.add('hidden'); cmdInput.blur();
+    } else if (e.key === 'F2') {
+      e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Equity> `;
+    } else if (e.key === 'F3') {
+      e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Crypto> `;
+    }
   });
 
   window.addEventListener('keydown', (e) => {
