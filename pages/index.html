@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenTerm — Quantitative Multi-Asset Terminal</title>
+  <title>OpenTerm — Live Multi-Asset Quantitative Terminal</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root {
@@ -28,20 +28,20 @@
     .term-table { width: 100%; border-collapse: collapse; font-size: 12px; }
     .term-table th { position: sticky; top: 0; background: var(--sidebar); color: var(--muted-foreground); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
     .term-table td { padding: 5px 8px; border-bottom: 1px solid var(--card-border); white-space: nowrap; }
-    .term-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+    .term-table tbody tr:hover { background: rgba(56, 189, 248, 0.08); }
     .pane-active { outline: 2px solid var(--warning); outline-offset: -1px; }
     canvas { display: block; }
   </style>
 </head>
 <body class="bg-[var(--background)] text-[var(--foreground)] antialiased m-0 p-0">
   <div id="app" class="min-h-screen flex flex-col">
-    <!-- Top Market Sessions & Live Ticker Strip -->
+    <!-- Top Market Sessions & Real-Time Ticker Strip -->
     <div id="status-bar" class="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-[var(--sidebar)] border-b border-[var(--border)] text-xs"></div>
 
     <!-- Global Mnemonic Command Bar -->
     <header class="px-3 py-2 bg-[var(--card)] border-b border-[var(--border)]">
       <div class="flex flex-wrap items-center gap-2">
-        <div class="relative flex-1 min-w-[240px]">
+        <div class="relative flex-1 min-w-[260px]">
           <div class="flex items-center gap-2 px-2.5 py-1.5 rounded bg-[var(--background)] border border-[var(--warning)]">
             <span id="active-pane-badge" class="mono text-xs font-bold px-1.5 py-0.5 rounded bg-[var(--warning)] text-black">P1</span>
             <input
@@ -49,7 +49,7 @@
               type="text"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Type command: AAPL US <Equity> DES | 600519 CH FA | BTC-USD GP | PORT | BQL  (Press /)"
+              placeholder="Any live ticker: AAPL US DES | TSLA US GP | 600519 CH FA | 000001 CH GP | BTC-USD GP | PORT | BQL  (Press /)"
               class="w-full bg-transparent text-[var(--foreground)] placeholder-[var(--placeholder)] mono text-xs outline-none"
             />
             <span class="hidden sm:inline mono text-xs text-[var(--muted-foreground)]">F2 EQ · F3 CR</span>
@@ -57,11 +57,12 @@
           <div id="cmd-dropdown" class="hidden absolute left-0 right-0 mt-1 bg-[var(--card)] border border-[var(--border)] rounded shadow-xl max-h-72 overflow-y-auto z-50"></div>
         </div>
 
-        <!-- Quick Presets -->
         <div class="flex flex-wrap items-center gap-1" id="quick-cmds"></div>
 
-        <!-- Layout Switcher -->
-        <div class="flex items-center gap-1 bg-[var(--background)] border border-[var(--border)] rounded p-0.5 mono text-xs" id="layout-controls"></div>
+        <div class="flex items-center gap-1.5">
+          <button id="btn-refresh-all" class="px-2 py-1 rounded bg-[var(--background)] border border-[var(--success)] text-[var(--success)] mono text-xs font-semibold cursor-pointer hover:opacity-80" title="Re-fetch live prices from OKX, Coinbase, EastMoney, DefiLlama & ER-API">↻ LIVE SYNC</button>
+          <div class="flex items-center gap-1 bg-[var(--background)] border border-[var(--border)] rounded p-0.5 mono text-xs" id="layout-controls"></div>
+        </div>
       </div>
       <div id="cmd-error" class="hidden mt-1.5 px-2.5 py-1 rounded border border-[var(--error)] text-[var(--error)] mono text-xs"></div>
     </header>
@@ -69,79 +70,61 @@
     <!-- Multi-Pane Workspace Grid -->
     <main id="workspace-grid" class="flex-1 grid gap-2 p-2"></main>
 
-    <!-- Footer Hotkey Guide -->
+    <!-- Footer -->
     <footer class="px-3 py-1 bg-[var(--sidebar)] border-t border-[var(--border)] flex flex-wrap items-center justify-between gap-2 text-xs mono text-[var(--muted-foreground)]">
       <div class="flex flex-wrap items-center gap-3">
         <span><strong class="text-[var(--warning)]">/</strong> Command</span>
         <span><strong class="text-[var(--warning)]">Alt+1..4</strong> Focus Pane</span>
-        <span><strong class="text-[var(--warning)]">Alt+L</strong> Cycle Link Group</span>
-        <span><strong class="text-[var(--warning)]">F2 / F3</strong> &lt;Equity&gt; / &lt;Crypto&gt;</span>
+        <span><strong class="text-[var(--warning)]">Alt+L</strong> Link Group</span>
+        <span><strong class="text-[var(--warning)]">F2/F3</strong> &lt;Equity&gt;/&lt;Crypto&gt;</span>
       </div>
-      <div>OpenTerm Standalone Engine · US Equities · China A-Shares (沪深/北交所) · Crypto</div>
+      <div id="footer-provenance">LIVE FEEDS: OKX + Coinbase WS (Crypto) · EastMoney (US & China A-Shares) · DefiLlama (TVL/DEX) · ER-API (FX)</div>
     </footer>
   </div>
 
 <script>
 (() => {
   // =========================================================================
-  // 1. MULTI-ASSET UNIFIED DATA ENGINE (Deterministic Seeded Lakehouse)
+  // 1. REAL-TIME LIVE MULTI-ASSET DATA REGISTRY (ZERO SIMULATED FAKE PRICES)
   // =========================================================================
-  function mulberry32(a) {
-    return function() {
-      let t = a += 0x6D2B79F5;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-  const rng = mulberry32(20261127);
-  function gauss() {
-    let u = 0, v = 0;
-    while (u === 0) u = rng();
-    while (v === 0) v = rng();
-    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-  }
   function roundCny(x) { return Math.round((x + Number.EPSILON) * 100) / 100; }
 
-  const FX = { USD_CNY: 7.214, CNY_USD: 1 / 7.214, USDT_USD: 1.0001 };
+  const FX = { USD_CNY: null, CNY_USD: null, USD_HKD: null, updatedAt: null };
+  const DEFI_GLOBAL = { dex24hUsd: null };
+  let wsStatus = 'CONNECTING';
 
   const INSTRUMENTS = {
     'EQ:US:AAPL': {
       id: 'EQ:US:AAPL', symbol: 'AAPL', name: 'Apple Inc.', localName: '', market: 'US', assetClass: 'EQUITY',
-      exchange: 'XNAS', ccy: 'USD', sector: 'Information Technology', industry: 'Consumer Electronics & Services',
+      exchange: 'NASDAQ', ccy: 'USD', sector: 'Information Technology', industry: 'Consumer Electronics & Services',
       settlement: 'T+1 US', lotSize: 1, limitPct: null, shares: 15.115e9, beta: 1.18, divYield: 0.44, cik: '0000320193',
-      desc: 'Apple Inc. designs smartphones, Mac computers, wearables, and high-margin recurring services (App Store, iCloud, Apple Pay). Deep US options liquidity and institutional 13F ownership.',
+      eastmoneySecid: '105.AAPL',
+      desc: 'Apple Inc. designs smartphones, personal computers, wearables, and high-margin recurring services (App Store, iCloud, Apple Pay). Live OHLCV fetched directly from market feeds.',
       aliases: ['AAPL', 'AAPL US', 'AAPL US <EQUITY>', '0000320193'],
-      seedPx: 182, drift: 0.00055, vol: 0.0145, baseVol: 52e6,
-      finStd: 'US_GAAP',
+      finStd: 'US_GAAP (SEC 10-K Reported)',
       fy: [
         { yr: 'FY2022', rev: 394.33e9, gp: 170.78e9, ebitda: 130.54e9, ni: 99.80e9, assets: 352.76e9, debt: 120.07e9, cash: 48.30e9, eq: 50.67e9, ocf: 122.15e9, capex: 10.71e9 },
         { yr: 'FY2023', rev: 383.29e9, gp: 169.15e9, ebitda: 125.82e9, ni: 97.00e9, assets: 352.58e9, debt: 111.09e9, cash: 61.56e9, eq: 62.15e9, ocf: 110.54e9, capex: 10.96e9 },
         { yr: 'FY2024', rev: 391.04e9, gp: 180.68e9, ebitda: 134.66e9, ni: 93.74e9, assets: 364.98e9, debt: 106.63e9, cash: 65.17e9, eq: 56.95e9, ocf: 118.25e9, capex: 9.45e9 },
-        { yr: 'FY2025', rev: 416.80e9, gp: 195.90e9, ebitda: 145.90e9, ni: 109.20e9, assets: 378.40e9, debt: 101.50e9, cash: 71.20e9, eq: 68.80e9, ocf: 128.40e9, capex: 10.20e9 },
+        { yr: 'FY2025', rev: 416.16e9, gp: 195.20e9, ebitda: 144.80e9, ni: 112.01e9, assets: 376.50e9, debt: 98.70e9, cash: 68.40e9, eq: 73.70e9, ocf: 126.90e9, capex: 10.40e9 },
       ],
       holders13f: [
         { name: 'Vanguard Group Inc.', pct: 8.82, qoq: '+14.2M' },
         { name: 'BlackRock Inc.', pct: 7.15, qoq: '+9.8M' },
-        { name: 'Berkshire Hathaway', pct: 3.12, qoq: '-8.5M' },
         { name: 'State Street Corp.', pct: 3.94, qoq: '-2.1M' },
+        { name: 'Berkshire Hathaway', pct: 2.01, qoq: '-10.0M' },
       ],
-      events: [
-        { offset: 140, type: 'DIVIDEND', title: 'Quarterly Cash Dividend $0.26/sh' },
-        { offset: 72, type: 'SEC_10K', title: 'SEC Form 10-K Annual Report Filed' },
-        { offset: 22, type: 'EARNINGS', title: 'Q4 Earnings Beat (EPS $1.77 vs $1.68)' },
-      ],
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
     },
     'EQ:US:NVDA': {
       id: 'EQ:US:NVDA', symbol: 'NVDA', name: 'NVIDIA Corporation', localName: '', market: 'US', assetClass: 'EQUITY',
-      exchange: 'XNAS', ccy: 'USD', sector: 'Information Technology', industry: 'Semiconductors & AI Compute',
+      exchange: 'NASDAQ', ccy: 'USD', sector: 'Information Technology', industry: 'Semiconductors & AI Compute',
       settlement: 'T+1 US', lotSize: 1, limitPct: null, shares: 24.53e9, beta: 1.66, divYield: 0.03, cik: '0001045810',
-      desc: 'NVIDIA delivers accelerated GPU compute, CUDA software, and rack-scale AI data center fabrics powering global model training and inference.',
+      eastmoneySecid: '105.NVDA',
+      desc: 'NVIDIA delivers accelerated GPU compute, CUDA software, and rack-scale AI data center platforms.',
       aliases: ['NVDA', 'NVDA US', 'NVDA US <EQUITY>', '0001045810'],
-      seedPx: 74, drift: 0.0017, vol: 0.027, baseVol: 240e6,
-      finStd: 'US_GAAP',
+      finStd: 'US_GAAP (SEC 10-K Reported)',
       fy: [
-        { yr: 'FY2022', rev: 26.91e9, gp: 17.48e9, ebitda: 11.22e9, ni: 9.75e9, assets: 44.19e9, debt: 10.95e9, cash: 21.21e9, eq: 26.61e9, ocf: 9.11e9, capex: 0.98e9 },
         { yr: 'FY2023', rev: 26.97e9, gp: 15.36e9, ebitda: 5.77e9, ni: 4.37e9, assets: 41.18e9, debt: 10.95e9, cash: 13.30e9, eq: 22.10e9, ocf: 5.64e9, capex: 1.83e9 },
         { yr: 'FY2024', rev: 60.92e9, gp: 44.30e9, ebitda: 34.48e9, ni: 29.76e9, assets: 65.73e9, debt: 9.71e9, cash: 25.98e9, eq: 42.98e9, ocf: 28.09e9, capex: 1.07e9 },
         { yr: 'FY2025', rev: 130.50e9, gp: 97.85e9, ebitda: 83.60e9, ni: 72.88e9, assets: 111.60e9, debt: 8.46e9, cash: 43.21e9, eq: 79.33e9, ocf: 64.09e9, capex: 3.24e9 },
@@ -152,186 +135,458 @@
         { name: 'FMR LLC (Fidelity)', pct: 4.18, qoq: '+11.2M' },
         { name: 'State Street Corp.', pct: 3.85, qoq: '+4.5M' },
       ],
-      events: [
-        { offset: 110, type: 'SEC_10Q', title: 'SEC Form 10-Q Quarterly Filing' },
-        { offset: 18, type: 'EARNINGS', title: 'Data Center Revenue +78% YoY Beat' },
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
+    },
+    'EQ:US:MSFT': {
+      id: 'EQ:US:MSFT', symbol: 'MSFT', name: 'Microsoft Corporation', localName: '', market: 'US', assetClass: 'EQUITY',
+      exchange: 'NASDAQ', ccy: 'USD', sector: 'Information Technology', industry: 'Cloud & Enterprise Software',
+      settlement: 'T+1 US', lotSize: 1, limitPct: null, shares: 7.434e9, beta: 0.94, divYield: 0.72, cik: '0000789019',
+      eastmoneySecid: '105.MSFT',
+      desc: 'Microsoft operates Azure cloud infrastructure, M365 enterprise productivity suites, GitHub, and AI Copilot platforms.',
+      aliases: ['MSFT', 'MSFT US', 'MSFT US <EQUITY>', '0000789019'],
+      finStd: 'US_GAAP (SEC 10-K Reported)',
+      fy: [
+        { yr: 'FY2023', rev: 211.92e9, gp: 146.05e9, ebitda: 102.38e9, ni: 72.36e9, assets: 411.98e9, debt: 59.97e9, cash: 111.26e9, eq: 206.22e9, ocf: 87.58e9, capex: 28.11e9 },
+        { yr: 'FY2024', rev: 245.12e9, gp: 171.01e9, ebitda: 129.43e9, ni: 88.14e9, assets: 512.16e9, debt: 67.13e9, cash: 75.54e9, eq: 268.48e9, ocf: 118.55e9, capex: 44.48e9 },
+        { yr: 'FY2025', rev: 281.72e9, gp: 194.10e9, ebitda: 152.30e9, ni: 101.83e9, assets: 572.40e9, debt: 61.20e9, cash: 85.30e9, eq: 324.10e9, ocf: 136.20e9, capex: 64.50e9 },
       ],
+      holders13f: [
+        { name: 'Vanguard Group Inc.', pct: 9.05, qoq: '+4.1M' },
+        { name: 'BlackRock Inc.', pct: 7.42, qoq: '+3.2M' },
+        { name: 'State Street Corp.', pct: 4.02, qoq: '+0.8M' },
+      ],
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
     },
     'EQ:SSE:600519': {
       id: 'EQ:SSE:600519', symbol: '600519', name: 'Kweichow Moutai Co., Ltd.', localName: '贵州茅台', market: 'CN_ASHARE', assetClass: 'EQUITY',
       exchange: 'XSHG (.SS)', ccy: 'CNY', sector: 'Consumer Staples', industry: 'Distillers & Vintners (Baijiu)',
       settlement: 'T+1 CN Strict', lotSize: 100, limitPct: 0.10, board: 'SSE MAIN (±10%)', northboundEligible: true,
-      shares: 1.2562e9, beta: 0.88, divYield: 3.45,
-      desc: 'Kweichow Moutai (贵州茅台) produces flagship Feitian Maotai baijiu. Bellwether CSI 300 constituent traded on SSE Main Board under strict T+1 settlement, ±10% daily price limits, and heavy Stock Connect Northbound (北向资金) participation.',
+      shares: 1.2562e9, beta: 0.88, divYield: 3.45, eastmoneySecid: '1.600519',
+      desc: 'Kweichow Moutai (贵州茅台) traded on SSE Main Board (.SS) under strict T+1 settlement and ±10% daily price limits with Stock Connect Northbound eligibility.',
       aliases: ['600519', '600519 CH', '600519.SS', '600519 CH <EQUITY>', '贵州茅台'],
-      seedPx: 1580, drift: 0.00025, vol: 0.0155, baseVol: 3.4e6,
-      finStd: 'CN_CAS',
+      finStd: 'CN_CAS (Annual Report)',
       fy: [
         { yr: 'FY2022', rev: 127.55e9, gp: 117.19e9, ebitda: 90.85e9, ni: 62.72e9, assets: 254.36e9, debt: 0.48e9, cash: 159.42e9, eq: 197.48e9, ocf: 36.70e9, capex: 5.31e9 },
         { yr: 'FY2023', rev: 150.56e9, gp: 138.45e9, ebitda: 107.60e9, ni: 74.73e9, assets: 272.70e9, debt: 0.42e9, cash: 171.20e9, eq: 215.67e9, ocf: 66.59e9, capex: 4.92e9 },
         { yr: 'FY2024', rev: 174.14e9, gp: 160.04e9, ebitda: 124.10e9, ni: 86.23e9, assets: 298.94e9, debt: 0.39e9, cash: 186.50e9, eq: 233.11e9, ocf: 92.46e9, capex: 5.65e9 },
-        { yr: 'FY2025', rev: 191.20e9, gp: 175.80e9, ebitda: 136.40e9, ni: 94.80e9, assets: 321.40e9, debt: 0.35e9, cash: 201.80e9, eq: 252.40e9, ocf: 98.10e9, capex: 5.90e9 },
+        { yr: 'FY2025', rev: 187.20e9, gp: 171.80e9, ebitda: 133.10e9, ni: 92.40e9, assets: 318.60e9, debt: 0.35e9, cash: 199.40e9, eq: 249.80e9, ocf: 96.40e9, capex: 5.80e9 },
       ],
-      nbHoldPct: 7.42, turnoverPct: 0.48, marginBalCny: 22.4e9,
-      events: [
-        { offset: 120, type: 'DIVIDEND', title: '派息除权 ¥27.62/股' },
-        { offset: 30, type: 'CSRC_NOTICE', title: '上交所三季报: 营收与归母净利稳健增长' },
-      ],
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
     },
     'EQ:SZSE:300750': {
       id: 'EQ:SZSE:300750', symbol: '300750', name: 'CATL (Contemporary Amperex)', localName: '宁德时代', market: 'CN_ASHARE', assetClass: 'EQUITY',
       exchange: 'XSHE (.SZ)', ccy: 'CNY', sector: 'Industrials', industry: 'EV Batteries & Energy Storage',
       settlement: 'T+1 CN Strict', lotSize: 100, limitPct: 0.20, board: 'SZSE CHINEXT (±20%)', northboundEligible: true,
-      shares: 4.403e9, beta: 1.24, divYield: 2.15,
-      desc: 'CATL (宁德时代) is the global leader in EV lithium-ion and grid-scale energy storage batteries. Traded on Shenzhen ChiNext (创业板) with ±20% daily price limits and strict T+1 settlement.',
+      shares: 4.403e9, beta: 1.24, divYield: 2.15, eastmoneySecid: '0.300750',
+      desc: 'CATL (宁德时代) traded on Shenzhen ChiNext (创业板 .SZ) with ±20% daily price limits and T+1 settlement.',
       aliases: ['300750', '300750 CH', '300750.SZ', '300750 CH <EQUITY>', '宁德时代'],
-      seedPx: 192, drift: 0.00072, vol: 0.022, baseVol: 28e6,
-      finStd: 'CN_CAS',
+      finStd: 'CN_CAS (Annual Report)',
       fy: [
         { yr: 'FY2022', rev: 328.59e9, gp: 66.54e9, ebitda: 49.40e9, ni: 30.73e9, assets: 600.95e9, debt: 119.50e9, cash: 191.04e9, eq: 164.48e9, ocf: 61.21e9, capex: 48.22e9 },
         { yr: 'FY2023', rev: 400.92e9, gp: 91.85e9, ebitda: 74.20e9, ni: 44.12e9, assets: 717.17e9, debt: 128.40e9, cash: 264.31e9, eq: 197.71e9, ocf: 92.83e9, capex: 33.62e9 },
         { yr: 'FY2024', rev: 362.01e9, gp: 88.50e9, ebitda: 81.90e9, ni: 50.74e9, assets: 786.66e9, debt: 121.20e9, cash: 303.51e9, eq: 246.93e9, ocf: 96.99e9, capex: 31.18e9 },
-        { yr: 'FY2025', rev: 418.50e9, gp: 104.60e9, ebitda: 95.40e9, ni: 59.80e9, assets: 845.20e9, debt: 114.80e9, cash: 338.90e9, eq: 286.40e9, ocf: 108.50e9, capex: 34.20e9 },
+        { yr: 'FY2025', rev: 412.40e9, gp: 102.80e9, ebitda: 94.20e9, ni: 58.90e9, assets: 839.10e9, debt: 115.60e9, cash: 331.40e9, eq: 281.20e9, ocf: 105.20e9, capex: 33.80e9 },
       ],
-      nbHoldPct: 9.85, turnoverPct: 1.64, marginBalCny: 16.8e9,
-      events: [
-        { offset: 95, type: 'CSRC_NOTICE', title: '深交所公告: 神行超充电池海外工厂投产' },
-        { offset: 28, type: 'EARNINGS', title: '三季报超预期: 储能毛利率创新高' },
-      ],
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
     },
-    'EQ:BSE:430047': {
-      id: 'EQ:BSE:430047', symbol: '430047', name: 'Beijing Northland Biotech', localName: '诺思兰德', market: 'CN_ASHARE', assetClass: 'EQUITY',
+    'EQ:SSE:688981': {
+      id: 'EQ:SSE:688981', symbol: '688981', name: 'SMIC (Semiconductor Mfg Intl)', localName: '中芯国际', market: 'CN_ASHARE', assetClass: 'EQUITY',
+      exchange: 'XSHG (.SS)', ccy: 'CNY', sector: 'Information Technology', industry: 'Semiconductor Foundry',
+      settlement: 'T+1 CN Strict', lotSize: 200, limitPct: 0.20, board: 'SSE STAR 科创板 (±20%)', northboundEligible: true,
+      shares: 7.975e9, beta: 1.42, divYield: 0, eastmoneySecid: '1.688981',
+      desc: 'SMIC (中芯国际) traded on SSE STAR Market (科创板 .SS) with ±20% daily price limits and 200-share minimum lot.',
+      aliases: ['688981', '688981 CH', '688981.SS', '中芯国际'],
+      finStd: 'CN_CAS (Annual Report)',
+      fy: [
+        { yr: 'FY2022', rev: 49.52e9, gp: 18.88e9, ebitda: 29.10e9, ni: 12.13e9, assets: 305.10e9, debt: 62.40e9, cash: 98.20e9, eq: 134.90e9, ocf: 36.20e9, capex: 43.10e9 },
+        { yr: 'FY2023', rev: 45.25e9, gp: 8.73e9, ebitda: 23.80e9, ni: 4.82e9, assets: 338.60e9, debt: 78.50e9, cash: 89.10e9, eq: 142.30e9, ocf: 24.10e9, capex: 52.80e9 },
+        { yr: 'FY2024', rev: 57.80e9, gp: 10.40e9, ebitda: 28.90e9, ni: 3.70e9, assets: 355.40e9, debt: 84.20e9, cash: 82.40e9, eq: 148.60e9, ocf: 26.80e9, capex: 51.40e9 },
+      ],
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
+    },
+    'EQ:BSE:920047': {
+      id: 'EQ:BSE:920047', symbol: '920047', name: 'Beijing Northland Biotech', localName: '诺思兰德', market: 'CN_ASHARE', assetClass: 'EQUITY',
       exchange: 'XBSE (.BJ)', ccy: 'CNY', sector: 'Health Care', industry: 'Biotechnology (BSE)',
       settlement: 'T+1 CN Strict', lotSize: 100, limitPct: 0.30, board: 'BSE 北交所 (±30%)', northboundEligible: false,
-      shares: 274.2e6, beta: 1.35, divYield: 0,
-      desc: 'Beijing Northland Biotech (诺思兰德) develops gene therapy biologics. Traded on Beijing Stock Exchange (北交所 .BJ) with wide ±30% daily price limits.',
-      aliases: ['430047', '430047 CH', '430047.BJ', '430047 BJ', '诺思兰德'],
-      seedPx: 14.8, drift: 0.0005, vol: 0.033, baseVol: 4.2e6,
-      finStd: 'CN_CAS',
+      shares: 274.2e6, beta: 1.35, divYield: 0, eastmoneySecid: '0.920047',
+      desc: 'Beijing Northland Biotech (诺思兰德, migrated from 430047 → 920047) traded on Beijing Stock Exchange (北交所 .BJ) with ±30% daily price limits.',
+      aliases: ['920047', '430047', '920047.BJ', '430047.BJ', '920047 CH', '430047 CH', '诺思兰德'],
+      finStd: 'CN_CAS (Annual Report)',
       fy: [
-        { yr: 'FY2022', rev: 0.068e9, gp: 0.042e9, ebitda: -0.052e9, ni: -0.063e9, assets: 0.58e9, debt: 0.04e9, cash: 0.24e9, eq: 0.45e9, ocf: -0.048e9, capex: 0.032e9 },
         { yr: 'FY2023', rev: 0.072e9, gp: 0.045e9, ebitda: -0.041e9, ni: -0.051e9, assets: 0.64e9, debt: 0.05e9, cash: 0.28e9, eq: 0.49e9, ocf: -0.039e9, capex: 0.029e9 },
         { yr: 'FY2024', rev: 0.089e9, gp: 0.057e9, ebitda: -0.025e9, ni: -0.035e9, assets: 0.71e9, debt: 0.05e9, cash: 0.31e9, eq: 0.53e9, ocf: -0.022e9, capex: 0.024e9 },
-        { yr: 'FY2025', rev: 0.138e9, gp: 0.094e9, ebitda: 0.012e9, ni: 0.003e9, assets: 0.79e9, debt: 0.04e9, cash: 0.35e9, eq: 0.58e9, ocf: 0.015e9, capex: 0.021e9 },
       ],
-      nbHoldPct: 0, turnoverPct: 3.12, marginBalCny: 0.18e9,
-      events: [{ offset: 40, type: 'CSRC_NOTICE', title: '北交所公告: 基因治疗临床里程碑突破' }],
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
     },
     'CR:SPOT:BTC-USD': {
-      id: 'CR:SPOT:BTC-USD', symbol: 'BTC-USD', name: 'Bitcoin Spot (Aggregate)', localName: '比特币', market: 'CRYPTO', assetClass: 'CRYPTO',
-      exchange: 'AGG 24/7', ccy: 'USD', sector: 'Digital Assets', industry: 'Layer-1 Store of Value',
-      settlement: 'T+0 Instant', lotSize: 0.00001, limitPct: null, shares: 19.94e6, maxSupply: 21e6, beta: 1.85, divYield: 0,
-      desc: 'Bitcoin (BTC) decentralized proof-of-work monetary network trading 24/7 across spot CEXs, regulated US Spot ETFs, and perpetual futures venues with 21M hard supply cap.',
+      id: 'CR:SPOT:BTC-USD', symbol: 'BTC-USD', name: 'Bitcoin Spot & Perpetual', localName: '比特币', market: 'CRYPTO', assetClass: 'CRYPTO',
+      exchange: 'OKX / COINBASE 24/7', ccy: 'USD', sector: 'Digital Assets', industry: 'Layer-1 Store of Value',
+      settlement: 'T+0 Instant', lotSize: 0.00001, limitPct: null, shares: 19.95e6, maxSupply: 21e6, beta: 1.85, divYield: 0,
+      okxSpot: 'BTC-USDT', okxSwap: 'BTC-USDT-SWAP', coinbaseId: 'BTC-USD', llamaChain: 'Bitcoin',
+      desc: 'Bitcoin (BTC) 24/7 live spot price streamed via Coinbase WebSocket & OKX REST, with real-time OKX perpetual 8h funding rate, Open Interest, and DefiLlama TVL.',
       aliases: ['BTC', 'BTC-USD', 'BTC/USDT', 'BTC-USD <CRYPTO>', 'XBTUSD', '比特币'],
-      seedPx: 62000, drift: 0.0014, vol: 0.027, baseVol: 420e3,
       finStd: 'ONCHAIN_TOKENOMICS',
       fy: [
-        { yr: 'FY2022', rev: 0.14e9, gp: 0.14e9, ebitda: 0.14e9, ni: 0.14e9, assets: 320e9, debt: 0, cash: 0, eq: 320e9, ocf: 0.14e9, capex: 0 },
         { yr: 'FY2023', rev: 0.79e9, gp: 0.79e9, ebitda: 0.79e9, ni: 0.79e9, assets: 825e9, debt: 0, cash: 0, eq: 825e9, ocf: 0.79e9, capex: 0 },
         { yr: 'FY2024', rev: 0.94e9, gp: 0.94e9, ebitda: 0.94e9, ni: 0.94e9, assets: 1850e9, debt: 0, cash: 0, eq: 1850e9, ocf: 0.94e9, capex: 0 },
-        { yr: 'FY2025', rev: 1.28e9, gp: 1.28e9, ebitda: 1.28e9, ni: 1.28e9, assets: 2140e9, debt: 0, cash: 0, eq: 2140e9, ocf: 1.28e9, capex: 0 },
       ],
-      crypto: { funding8h: 0.000112, oiUsd: 24.8e9, basisBps: 8.4, cexVol: 28.4e9, dexVol: 1.9e9, tvlUsd: 0, activeAddr: 940000 },
-      events: [
-        { offset: 150, type: 'HALVING', title: 'Post-Halving Issuance Milestone (3.125 BTC/blk)' },
-        { offset: 45, type: 'MACRO', title: 'Global Spot BTC ETF Inflows Cross $65B' },
-      ],
+      crypto: { funding8h: null, nextFunding: null, oiCoins: null, oiUsd: null, vol24hUsd: null, tvlUsd: null, fundingHistory: [] },
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
     },
     'CR:SPOT:ETH-USD': {
-      id: 'CR:SPOT:ETH-USD', symbol: 'ETH-USD', name: 'Ethereum Spot (Aggregate)', localName: '以太坊', market: 'CRYPTO', assetClass: 'CRYPTO',
-      exchange: 'AGG 24/7', ccy: 'USD', sector: 'Digital Assets', industry: 'Smart Contract L1 & DeFi',
+      id: 'CR:SPOT:ETH-USD', symbol: 'ETH-USD', name: 'Ethereum Spot & Perpetual', localName: '以太坊', market: 'CRYPTO', assetClass: 'CRYPTO',
+      exchange: 'OKX / COINBASE 24/7', ccy: 'USD', sector: 'Digital Assets', industry: 'Smart Contract L1 & DeFi',
       settlement: 'T+0 Instant', lotSize: 0.0001, limitPct: null, shares: 120.42e6, maxSupply: null, beta: 2.05, divYield: 0,
-      desc: 'Ethereum (ETH) programmable proof-of-stake L1 settlement network hosting leading DeFi TVL, L2 rollups, and EIP-1559 fee burn tokenomics.',
+      okxSpot: 'ETH-USDT', okxSwap: 'ETH-USDT-SWAP', coinbaseId: 'ETH-USD', llamaChain: 'Ethereum',
+      desc: 'Ethereum (ETH) 24/7 live spot price streamed via Coinbase WebSocket & OKX REST, with real-time 8h funding rate, Open Interest, and DefiLlama TVL.',
       aliases: ['ETH', 'ETH-USD', 'ETH/USDT', 'ETH-USD <CRYPTO>', '以太坊'],
-      seedPx: 2950, drift: 0.0008, vol: 0.032, baseVol: 5.8e6,
       finStd: 'ONCHAIN_TOKENOMICS',
       fy: [
-        { yr: 'FY2022', rev: 4.30e9, gp: 3.85e9, ebitda: 3.85e9, ni: 1.85e9, assets: 145e9, debt: 0, cash: 28e9, eq: 145e9, ocf: 3.85e9, capex: 0 },
         { yr: 'FY2023', rev: 2.41e9, gp: 2.02e9, ebitda: 2.02e9, ni: 0.72e9, assets: 274e9, debt: 0, cash: 39e9, eq: 274e9, ocf: 2.02e9, capex: 0 },
         { yr: 'FY2024', rev: 2.68e9, gp: 2.15e9, ebitda: 2.15e9, ni: 0.64e9, assets: 410e9, debt: 0, cash: 66e9, eq: 410e9, ocf: 2.15e9, capex: 0 },
-        { yr: 'FY2025', rev: 3.45e9, gp: 2.82e9, ebitda: 2.82e9, ni: 1.18e9, assets: 480e9, debt: 0, cash: 84e9, eq: 480e9, ocf: 2.82e9, capex: 0 },
       ],
-      crypto: { funding8h: 0.000095, oiUsd: 11.6e9, basisBps: 6.1, cexVol: 14.2e9, dexVol: 4.6e9, tvlUsd: 84.2e9, activeAddr: 560000 },
-      events: [{ offset: 95, type: 'UPGRADE', title: 'Pectra Mainnet Upgrade (2x Blob Capacity)' }],
+      crypto: { funding8h: null, nextFunding: null, oiCoins: null, oiUsd: null, vol24hUsd: null, tvlUsd: null, fundingHistory: [] },
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
+    },
+    'CR:SPOT:SOL-USD': {
+      id: 'CR:SPOT:SOL-USD', symbol: 'SOL-USD', name: 'Solana Spot & Perpetual', localName: '索拉纳', market: 'CRYPTO', assetClass: 'CRYPTO',
+      exchange: 'OKX / COINBASE 24/7', ccy: 'USD', sector: 'Digital Assets', industry: 'High-Throughput L1',
+      settlement: 'T+0 Instant', lotSize: 0.01, limitPct: null, shares: 475e6, maxSupply: null, beta: 2.45, divYield: 0,
+      okxSpot: 'SOL-USDT', okxSwap: 'SOL-USDT-SWAP', coinbaseId: 'SOL-USD', llamaChain: 'Solana',
+      desc: 'Solana (SOL) 24/7 live spot price streamed via Coinbase WebSocket & OKX REST, with real-time 8h funding rate, Open Interest, and DefiLlama TVL.',
+      aliases: ['SOL', 'SOL-USD', 'SOL/USDT', 'SOL-USD <CRYPTO>', '索拉纳'],
+      finStd: 'ONCHAIN_TOKENOMICS',
+      fy: [
+        { yr: 'FY2024', rev: 0.76e9, gp: 0.38e9, ebitda: 0.38e9, ni: 0.05e9, assets: 98e9, debt: 0, cash: 8.8e9, eq: 98e9, ocf: 0.38e9, capex: 0 },
+      ],
+      crypto: { funding8h: null, nextFunding: null, oiCoins: null, oiUsd: null, vol24hUsd: null, tvlUsd: null, fundingHistory: [] },
+      candles: [], last: null, prevClose: null, high52: null, low52: null, liveSource: null, liveUpdatedAt: null, loadError: null,
     },
   };
 
-  // Generate 220 correlated daily bars per instrument + CN Northbound series
-  const N_BARS = 220;
-  const macroF = Array.from({ length: N_BARS }, () => gauss());
-  const cnF = Array.from({ length: N_BARS }, () => gauss());
-  const crF = Array.from({ length: N_BARS }, () => gauss());
-  const baseDate = new Date('2026-11-27T00:00:00Z');
-
-  Object.values(INSTRUMENTS).forEach((inst) => {
-    let px = inst.seedPx;
-    const candles = [];
-    const nbFlows = [];
-    for (let i = N_BARS - 1; i >= 0; i--) {
-      const idx = N_BARS - 1 - i;
-      const dt = new Date(baseDate.getTime() - i * 86400000);
-      const dateStr = dt.toISOString().slice(0, 10);
-      const shock =
-        inst.market === 'US' ? 0.6 * macroF[idx] + 0.8 * gauss() :
-        inst.market === 'CN_ASHARE' ? 0.25 * macroF[idx] + 0.6 * cnF[idx] + 0.76 * gauss() :
-        0.38 * macroF[idx] + 0.7 * crF[idx] + 0.6 * gauss();
-
-      const prev = px;
-      let ret = inst.drift + inst.vol * shock;
-      if (inst.market === 'CN_ASHARE' && idx === N_BARS - 15) ret = inst.limitPct; // inject realistic limit-up day
-      let close = Math.max(1, prev * Math.exp(ret));
-      let hitUp = false, hitDn = false;
-
-      if (inst.market === 'CN_ASHARE' && inst.limitPct) {
-        const up = roundCny(prev * (1 + inst.limitPct));
-        const dn = roundCny(prev * (1 - inst.limitPct));
-        close = Math.min(up, Math.max(dn, roundCny(close)));
-        hitUp = close >= up - 0.005;
-        hitDn = close <= dn + 0.005;
-      } else {
-        close = Number(close.toFixed(2));
-      }
-      const open = Number((prev * (1 + gauss() * inst.vol * 0.28)).toFixed(2));
-      const high = Number((Math.max(open, close) * (1 + Math.abs(gauss() * inst.vol * 0.45))).toFixed(2));
-      const low = Number((Math.min(open, close) * (1 - Math.abs(gauss() * inst.vol * 0.45))).toFixed(2));
-      const volume = Math.round(inst.baseVol * Math.max(0.35, 1 + gauss() * 0.35 + Math.abs(ret) * 10));
-      candles.push({ date: dateStr, open, high, low, close, volume, prev, hitUp, hitDn });
-      if (inst.market === 'CN_ASHARE') {
-        nbFlows.push({ date: dateStr, flow: (close >= prev ? 1.4e8 : -1.0e8) + gauss() * 3.5e8 });
-      }
-      px = close;
-    }
-    inst.candles = candles;
-    inst.nbFlows = nbFlows.slice(-20);
-    inst.last = candles[candles.length - 1];
-    inst.prevClose = candles[candles.length - 2].close;
-    inst.high52 = Math.max(...candles.map((c) => c.high));
-    inst.low52 = Math.min(...candles.map((c) => c.low));
-  });
-
-  const NEWS_ITEMS = [
-    { id: 'n1', ts: '12m ago', src: 'SEC EDGAR / Reuters', lang: 'en', score: 0.72, label: 'BULLISH', tickers: ['EQ:US:NVDA'], title: 'NVIDIA Data Center Demand Surges as Hyperscalers Raise 2027 Capex Guidance', summary: 'Rack-scale AI cluster backlog expands with sustained 74%+ gross margin profile.' },
-    { id: 'n2', ts: '28m ago', src: '上交所公告 / 财联社', lang: 'zh', score: 0.65, label: 'BULLISH', tickers: ['EQ:SSE:600519'], title: '贵州茅台发布三季度经营数据：直销占比提升，北向资金连续5日净流入', summary: '核心大单品飞天茅台批价平稳，叠加高比例分红回购计划，获外资机构增持。' },
-    { id: 'n3', ts: '45m ago', src: 'CoinDesk / On-Chain', lang: 'en', score: 0.54, label: 'BULLISH', tickers: ['CR:SPOT:BTC-USD'], title: 'Bitcoin 8h Funding Rates Normalize While Institutional Spot ETF Inflows Accelerate', summary: 'CME & Binance open interest expand steadily without excessive retail leverage.' },
-    { id: 'n4', ts: '1h ago', src: 'SEC EDGAR 8-K', lang: 'en', score: 0.48, label: 'BULLISH', tickers: ['EQ:US:AAPL'], title: 'Apple Expands $110B Share Buyback Authorization Following Record Services Revenue', summary: 'Recurring App Store and iCloud margins beat consensus despite softer EU handset cycle.' },
-    { id: 'n5', ts: '2h ago', src: '深交所公告 / 证券时报', lang: 'zh', score: 0.61, label: 'BULLISH', tickers: ['EQ:SZSE:300750'], title: '宁德时代储能电池出货创新高，创业板成交额居首获北向资金净流入', summary: '海外大型储能项目交付提速，毛利率持续改善超预期。' },
-    { id: 'n6', ts: '3h ago', src: 'The Block / DefiLlama', lang: 'en', score: 0.35, label: 'BULLISH', tickers: ['CR:SPOT:ETH-USD'], title: 'Ethereum L2 Settlement Volume Hits Record; On-Chain RWA TVL Crosses New Milestone', summary: 'Blob fee burn accelerates as Uniswap DEX liquidity deepens across mainnet and rollups.' },
-    { id: 'n7', ts: '4h ago', src: 'Bloomberg Law', lang: 'en', score: -0.42, label: 'BEARISH', tickers: ['EQ:US:NVDA', 'EQ:US:AAPL'], title: 'Regulators Review Mega-Cap AI & Ecosystem Concentration; Antitrust Scrutiny Increases', summary: 'Analysts flag compliance overhang though enterprise cloud demand remains resilient.' },
-    { id: 'n8', ts: '5h ago', src: '北交所公告', lang: 'zh', score: 0.44, label: 'BULLISH', tickers: ['EQ:BSE:430047'], title: '诺思兰德披露基因治疗临床进展公告，北交所医药板块活跃度回升', summary: '创新生物药临床项目达成重要入组节点，成交量显著放大。' },
-  ];
-
-  // Portfolio transactions (including an intraday China A-share T+1 locked lot!)
-  const TRANSACTIONS = [
-    { id: 'EQ:US:AAPL', qty: 220, avgCost: INSTRUMENTS['EQ:US:AAPL'].last.close * 0.87, ccy: 'USD', fxAtTrade: 1.0, t1Locked: 0 },
-    { id: 'EQ:US:NVDA', qty: 350, avgCost: INSTRUMENTS['EQ:US:NVDA'].last.close * 0.78, ccy: 'USD', fxAtTrade: 1.0, t1Locked: 0 },
-    { id: 'EQ:SSE:600519', qty: 300, avgCost: INSTRUMENTS['EQ:SSE:600519'].last.close * 0.95, ccy: 'CNY', fxAtTrade: 1 / 7.24, t1Locked: 100 },
-    { id: 'EQ:SZSE:300750', qty: 1200, avgCost: INSTRUMENTS['EQ:SZSE:300750'].last.close * 0.86, ccy: 'CNY', fxAtTrade: 1 / 7.25, t1Locked: 0 },
-    { id: 'CR:SPOT:BTC-USD', qty: 0.85, avgCost: INSTRUMENTS['CR:SPOT:BTC-USD'].last.close * 0.77, ccy: 'USD', fxAtTrade: 1.0, t1Locked: 0 },
-    { id: 'CR:SPOT:ETH-USD', qty: 14, avgCost: INSTRUMENTS['CR:SPOT:ETH-USD'].last.close * 0.89, ccy: 'USD', fxAtTrade: 1.0, t1Locked: 0 },
+  // Sample Portfolio Holdings (cost basis computed from real live history once loaded)
+  const PORTFOLIO_LOTS = [
+    { id: 'EQ:US:AAPL', qty: 100, ccy: 'USD', t1Locked: 0 },
+    { id: 'EQ:US:NVDA', qty: 250, ccy: 'USD', t1Locked: 0 },
+    { id: 'EQ:SSE:600519', qty: 200, ccy: 'CNY', t1Locked: 100 }, // 100 shares bought today -> T+1 locked
+    { id: 'EQ:SZSE:300750', qty: 600, ccy: 'CNY', t1Locked: 0 },
+    { id: 'CR:SPOT:BTC-USD', qty: 0.75, ccy: 'USD', t1Locked: 0 },
+    { id: 'CR:SPOT:ETH-USD', qty: 12, ccy: 'USD', t1Locked: 0 },
   ];
 
   // =========================================================================
-  // 2. WORKSPACE STATE & MNEMONIC COMMAND BUS
+  // 2. LIVE PUBLIC API FETCHERS (OKX, Coinbase, EastMoney, DefiLlama, ER-API)
+  // =========================================================================
+  async function fetchLiveFX() {
+    try {
+      const r = await fetch('https://open.er-api.com/v6/latest/USD');
+      const d = await r.json();
+      if (d?.rates?.CNY) {
+        FX.USD_CNY = Number(d.rates.CNY);
+        FX.CNY_USD = 1 / FX.USD_CNY;
+        FX.USD_HKD = Number(d.rates.HKD || 7.8);
+        FX.updatedAt = d.time_last_update_utc || new Date().toISOString();
+      }
+    } catch (err) {
+      console.warn('FX fetch error:', err);
+    }
+  }
+
+  async function fetchLiveDefiLlama() {
+    try {
+      const [chainsRes, dexRes] = await Promise.all([
+        fetch('https://api.llama.fi/v2/chains').then((r) => r.json()).catch(() => []),
+        fetch('https://api.llama.fi/overview/dexs?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true').then((r) => r.json()).catch(() => null),
+      ]);
+      if (Array.isArray(chainsRes)) {
+        const byName = Object.fromEntries(chainsRes.map((c) => [c.name, Number(c.tvl || 0)]));
+        Object.values(INSTRUMENTS).forEach((inst) => {
+          if (inst.llamaChain && byName[inst.llamaChain] !== undefined) {
+            inst.crypto.tvlUsd = byName[inst.llamaChain];
+          }
+        });
+      }
+      if (dexRes?.total24h) DEFI_GLOBAL.dex24hUsd = Number(dexRes.total24h);
+    } catch (err) {
+      console.warn('DefiLlama fetch error:', err);
+    }
+  }
+
+  async function fetchEastMoneyInstrument(inst) {
+    const secids = inst.eastmoneySecid
+      ? [inst.eastmoneySecid]
+      : inst.market === 'US'
+        ? [`105.${inst.symbol}`, `106.${inst.symbol}`, `107.${inst.symbol}`]
+        : [inst.symbol.startsWith('6') ? `1.${inst.symbol}` : `0.${inst.symbol}`];
+
+    for (const sid of secids) {
+      try {
+        const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${encodeURIComponent(sid)}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=180`;
+        const resp = await fetch(url);
+        const json = await resp.json();
+        const klines = json?.data?.klines;
+        if (!Array.isArray(klines) || klines.length < 2) continue;
+
+        const candles = klines.map((line) => {
+          // Format: date,open,close,high,low,vol,turnover
+          const [date, o, c, h, l, v, amt] = line.split(',');
+          const volNum = inst.market === 'CN_ASHARE' ? Number(v) * 100 : Number(v);
+          return {
+            date,
+            open: Number(o),
+            close: Number(c),
+            high: Number(h),
+            low: Number(l),
+            volume: volNum,
+            turnover: Number(amt || 0),
+          };
+        });
+        inst.eastmoneySecid = sid;
+        if (json.data.name && !inst.localName && inst.market === 'CN_ASHARE') {
+          inst.localName = json.data.name;
+          inst.name = json.data.name;
+        }
+        inst.candles = candles;
+        inst.last = candles[candles.length - 1];
+        inst.prevClose = candles[candles.length - 2].close;
+        inst.high52 = Math.max(...candles.map((b) => b.high));
+        inst.low52 = Math.min(...candles.map((b) => b.low));
+        inst.liveSource = 'LIVE · EastMoney Market Feed';
+        inst.liveUpdatedAt = inst.last.date;
+        inst.loadError = null;
+        return true;
+      } catch (err) {
+        inst.loadError = err.message;
+      }
+    }
+    return false;
+  }
+
+  async function fetchCryptoInstrument(inst) {
+    try {
+      const [candlesRes, tickerRes, fundRes, oiRes, fundHistRes] = await Promise.all([
+        fetch(`https://www.okx.com/api/v5/market/candles?instId=${inst.okxSpot}&bar=1D&limit=180`).then((r) => r.json()),
+        fetch(`https://www.okx.com/api/v5/market/ticker?instId=${inst.okxSpot}`).then((r) => r.json()),
+        fetch(`https://www.okx.com/api/v5/public/funding-rate?instId=${inst.okxSwap}`).then((r) => r.json()).catch(() => null),
+        fetch(`https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=${inst.okxSwap}`).then((r) => r.json()).catch(() => null),
+        fetch(`https://www.okx.com/api/v5/public/funding-rate-history?instId=${inst.okxSwap}&limit=30`).then((r) => r.json()).catch(() => null),
+      ]);
+
+      const raw = candlesRes?.data;
+      if (!Array.isArray(raw) || raw.length < 2) throw new Error('OKX candles empty');
+
+      const candles = [...raw].reverse().map((c) => ({
+        date: new Date(Number(c[0])).toISOString().slice(0, 10),
+        open: Number(c[1]),
+        high: Number(c[2]),
+        low: Number(c[3]),
+        close: Number(c[4]),
+        volume: Number(c[5]),
+        turnover: Number(c[7] || 0),
+      }));
+
+      const t = tickerRes?.data?.[0];
+      if (t) {
+        const livePx = Number(t.last);
+        const lastBar = candles[candles.length - 1];
+        lastBar.close = livePx;
+        lastBar.high = Math.max(lastBar.high, Number(t.high24h || livePx));
+        lastBar.low = Math.min(lastBar.low, Number(t.low24h || livePx));
+        inst.prevClose = Number(t.open24h || candles[candles.length - 2].close);
+        inst.crypto.vol24hUsd = Number(t.volCcy24h || 0);
+      } else {
+        inst.prevClose = candles[candles.length - 2].close;
+      }
+
+      inst.candles = candles;
+      inst.last = candles[candles.length - 1];
+      inst.high52 = Math.max(...candles.map((b) => b.high));
+      inst.low52 = Math.min(...candles.map((b) => b.low));
+
+      if (fundRes?.data?.[0]) {
+        inst.crypto.funding8h = Number(fundRes.data[0].fundingRate);
+      }
+      if (oiRes?.data?.[0]) {
+        inst.crypto.oiCoins = Number(oiRes.data[0].oiCcy || 0);
+        inst.crypto.oiUsd = inst.crypto.oiCoins * inst.last.close;
+      }
+      if (Array.isArray(fundHistRes?.data)) {
+        inst.crypto.fundingHistory = [...fundHistRes.data].reverse().map((f) => ({
+          date: new Date(Number(f.fundingTime)).toISOString().slice(0, 10),
+          bps: Number(f.fundingRate) * 10000,
+        }));
+      }
+
+      inst.liveSource = 'LIVE · OKX Spot/Perp + Coinbase WS';
+      inst.liveUpdatedAt = new Date().toISOString().slice(11, 19) + ' UTC';
+      inst.loadError = null;
+      return true;
+    } catch (err) {
+      // Fallback to Coinbase Exchange REST if OKX is blocked in user's jurisdiction
+      try {
+        const stats = await fetch(`https://api.exchange.coinbase.com/products/${inst.coinbaseId}/stats`).then((r) => r.json());
+        const rawC = await fetch(`https://api.exchange.coinbase.com/products/${inst.coinbaseId}/candles?granularity=86400`).then((r) => r.json());
+        if (Array.isArray(rawC) && rawC.length > 1) {
+          const candles = [...rawC].reverse().slice(-180).map((c) => ({
+            date: new Date(Number(c[0]) * 1000).toISOString().slice(0, 10),
+            low: Number(c[1]), high: Number(c[2]), open: Number(c[3]), close: Number(c[4]), volume: Number(c[5]),
+          }));
+          if (stats?.last) candles[candles.length - 1].close = Number(stats.last);
+          inst.candles = candles;
+          inst.last = candles[candles.length - 1];
+          inst.prevClose = Number(stats?.open || candles[candles.length - 2].close);
+          inst.high52 = Math.max(...candles.map((b) => b.high));
+          inst.low52 = Math.min(...candles.map((b) => b.low));
+          inst.liveSource = 'LIVE · Coinbase Exchange';
+          inst.liveUpdatedAt = new Date().toISOString().slice(11, 19) + ' UTC';
+          inst.loadError = null;
+          return true;
+        }
+      } catch (e2) {
+        inst.loadError = `Crypto feed error: ${e2.message || err.message}`;
+      }
+      return false;
+    }
+  }
+
+  async function refreshAllLiveMarketData() {
+    const btn = document.getElementById('btn-refresh-all');
+    if (btn) btn.textContent = '↻ SYNCING...';
+    await Promise.all([
+      fetchLiveFX(),
+      fetchLiveDefiLlama(),
+      ...Object.values(INSTRUMENTS).map((inst) =>
+        inst.market === 'CRYPTO' ? fetchCryptoInstrument(inst) : fetchEastMoneyInstrument(inst)
+      ),
+    ]);
+    if (btn) btn.textContent = '↻ LIVE SYNC';
+    renderWorkspace();
+  }
+
+  // Real-Time Coinbase Exchange Public WebSocket for Live Crypto Ticks
+  function startLiveCryptoWebSocket() {
+    let ws;
+    function connect() {
+      try {
+        ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+        ws.onopen = () => {
+          wsStatus = 'LIVE WS';
+          const productIds = Object.values(INSTRUMENTS).filter((i) => i.coinbaseId).map((i) => i.coinbaseId);
+          ws.send(JSON.stringify({ type: 'subscribe', product_ids: productIds, channels: ['ticker'] }));
+          renderStatusBar();
+        };
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.type === 'ticker' && msg.price && msg.product_id) {
+              const inst = Object.values(INSTRUMENTS).find((i) => i.coinbaseId === msg.product_id);
+              if (inst && inst.last) {
+                const px = Number(msg.price);
+                inst.last.close = px;
+                inst.last.high = Math.max(inst.last.high, px);
+                inst.last.low = Math.min(inst.last.low, px);
+                if (msg.open_24h) inst.prevClose = Number(msg.open_24h);
+                inst.liveUpdatedAt = new Date().toISOString().slice(11, 19) + ' UTC';
+                if (inst.crypto && inst.crypto.oiCoins) inst.crypto.oiUsd = inst.crypto.oiCoins * px;
+                renderStatusBar();
+                state.panes.forEach((p) => {
+                  if (p.instId === inst.id && p.fn === 'GP') {
+                    drawCandleChart(document.getElementById(`gp-canvas-${p.id}`), inst);
+                  }
+                });
+              }
+            }
+          } catch {}
+        };
+        ws.onclose = () => {
+          wsStatus = 'RECONNECTING';
+          renderStatusBar();
+          setTimeout(connect, 5000);
+        };
+        ws.onerror = () => ws.close();
+      } catch {
+        wsStatus = 'POLL';
+      }
+    }
+    connect();
+  }
+
+  // Dynamic Any-Ticker Live Resolver (US Equities, China 6-digit A-Shares, Crypto pairs)
+  async function resolveOrFetchTicker(raw) {
+    const q = raw.trim().toUpperCase().replace(/<EQUITY>|<CRYPTO>|<FX>/g, '').trim();
+    if (!q) return null;
+    if (INSTRUMENTS[q]) return INSTRUMENTS[q];
+    for (const inst of Object.values(INSTRUMENTS)) {
+      if (inst.symbol.toUpperCase() === q || inst.aliases.some((a) => a.toUpperCase() === q)) return inst;
+    }
+    const toks = q.split(/\s+/);
+    const sym = toks[0].replace(/\.(SS|SH|SZ|BJ)$/i, '');
+    const mktHint = toks[1] || '';
+
+    for (const inst of Object.values(INSTRUMENTS)) {
+      if (inst.symbol.toUpperCase() === sym || inst.symbol.startsWith(sym + '-')) return inst;
+    }
+
+    // Dynamic China 6-digit A-share creation & live fetch
+    if (/^\d{6}$/.test(sym)) {
+      const isStar = sym.startsWith('688') || sym.startsWith('689');
+      const isChiNext = sym.startsWith('300') || sym.startsWith('301');
+      const isBse = sym.startsWith('920') || sym.startsWith('43') || sym.startsWith('83') || sym.startsWith('87');
+      const isSse = sym.startsWith('6');
+      const limitPct = isBse ? 0.30 : (isStar || isChiNext) ? 0.20 : 0.10;
+      const board = isBse ? 'BSE 北交所 (±30%)' : isStar ? 'SSE STAR (±20%)' : isChiNext ? 'SZSE CHINEXT (±20%)' : isSse ? 'SSE MAIN (±10%)' : 'SZSE MAIN (±10%)';
+      const id = `EQ:${isBse ? 'BSE' : isSse ? 'SSE' : 'SZSE'}:${sym}`;
+      const newInst = {
+        id, symbol: sym, name: sym, localName: '', market: 'CN_ASHARE', assetClass: 'EQUITY',
+        exchange: isBse ? 'XBSE (.BJ)' : isSse ? 'XSHG (.SS)' : 'XSHE (.SZ)', ccy: 'CNY',
+        sector: 'China A-Share', industry: board, settlement: 'T+1 CN Strict', lotSize: isStar ? 200 : 100,
+        limitPct, board, northboundEligible: !isBse, shares: 1e9, beta: 1.0, divYield: 0,
+        eastmoneySecid: `${isSse ? '1' : '0'}.${sym}`, desc: `Live China A-Share security ${sym} fetched dynamically.`,
+        aliases: [sym, `${sym} CH`], finStd: 'CN_CAS', fy: [], candles: [], last: null, prevClose: null,
+      };
+      const ok = await fetchEastMoneyInstrument(newInst);
+      if (ok) { INSTRUMENTS[id] = newInst; return newInst; }
+      return null;
+    }
+
+    // Dynamic Crypto pair creation & live fetch (e.g. DOGE-USD, XRP-USD, LINK-USD)
+    if (sym.includes('-') || sym.includes('/') || raw.toUpperCase().includes('CRYPTO')) {
+      const base = sym.split(/[-/]/)[0];
+      const id = `CR:SPOT:${base}-USD`;
+      const newInst = {
+        id, symbol: `${base}-USD`, name: `${base} Spot & Perpetual`, localName: '', market: 'CRYPTO', assetClass: 'CRYPTO',
+        exchange: 'OKX / COINBASE 24/7', ccy: 'USD', sector: 'Digital Assets', industry: 'Spot & Perpetual',
+        settlement: 'T+0 Instant', lotSize: 0.001, limitPct: null, shares: 1e8, beta: 2.0, divYield: 0,
+        okxSpot: `${base}-USDT`, okxSwap: `${base}-USDT-SWAP`, coinbaseId: `${base}-USD`,
+        desc: `Live 24/7 digital asset ${base}-USD fetched dynamically from OKX / Coinbase.`,
+        aliases: [base, `${base}-USD`], finStd: 'ONCHAIN_TOKENOMICS', fy: [],
+        crypto: { funding8h: null, oiCoins: null, oiUsd: null, vol24hUsd: null, tvlUsd: null, fundingHistory: [] },
+        candles: [], last: null, prevClose: null,
+      };
+      const ok = await fetchCryptoInstrument(newInst);
+      if (ok) { INSTRUMENTS[id] = newInst; return newInst; }
+      return null;
+    }
+
+    // Dynamic US Equity creation & live fetch (e.g. TSLA, AMZN, META, GOOGL)
+    if (/^[A-Z]{1,5}$/.test(sym)) {
+      const id = `EQ:US:${sym}`;
+      const newInst = {
+        id, symbol: sym, name: `${sym} (US Equity)`, localName: '', market: 'US', assetClass: 'EQUITY',
+        exchange: 'US', ccy: 'USD', sector: 'US Equity', industry: 'Live Market Security',
+        settlement: 'T+1 US', lotSize: 1, limitPct: null, shares: 1e9, beta: 1.1, divYield: 0,
+        desc: `Live US Equity ${sym} fetched dynamically from market feeds.`,
+        aliases: [sym, `${sym} US`], finStd: 'US_GAAP', fy: [], holders13f: [], candles: [], last: null, prevClose: null,
+      };
+      const ok = await fetchEastMoneyInstrument(newInst);
+      if (ok) { INSTRUMENTS[id] = newInst; return newInst; }
+      return null;
+    }
+    return null;
+  }
+
+  // =========================================================================
+  // 3. WORKSPACE STATE & MNEMONIC COMMAND BUS
   // =========================================================================
   const FUNCTIONS = ['DES', 'GP', 'FA', 'COMP', 'OPT', 'FLOW', 'PERP', 'NEWS', 'PORT', 'BQL'];
   const LINK_CYCLE = ['A', 'B', 'C', 'NONE'];
@@ -341,27 +596,24 @@
     activePaneId: 'pane-1',
     portBaseCcy: 'USD',
     compBaseCcy: 'USD',
-    newsFilter: { scopeActive: false, sentiment: '', lang: '', kw: '' },
-    bqlMode: 'SQL',
     bqlQuery: 'cross_asset',
     bqlResult: null,
     dcfParams: { wacc: 9.5, fcfG: 12.0, termG: 3.0 },
     faTab: 'IS',
-    gpOverlays: { sma20: true, sma50: true, bb: false, vp: true },
+    gpOverlays: { sma20: true, sma50: true, vp: true },
     panes: [
-      { id: 'pane-1', idx: 1, fn: 'DES', instId: 'EQ:SSE:600519', compIds: ['EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:SSE:600519', 'CR:SPOT:BTC-USD'], linkGroup: 'A' },
-      { id: 'pane-2', idx: 2, fn: 'GP', instId: 'EQ:SSE:600519', compIds: ['EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:SSE:600519', 'CR:SPOT:BTC-USD'], linkGroup: 'A' },
-      { id: 'pane-3', idx: 3, fn: 'FA', instId: 'EQ:US:AAPL', compIds: ['EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:SSE:600519'], linkGroup: 'B' },
-      { id: 'pane-4', idx: 4, fn: 'PORT', instId: 'CR:SPOT:BTC-USD', compIds: ['CR:SPOT:BTC-USD', 'CR:SPOT:ETH-USD'], linkGroup: 'NONE' },
+      { id: 'pane-1', idx: 1, fn: 'DES', instId: 'CR:SPOT:BTC-USD', compIds: ['EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:SSE:600519', 'CR:SPOT:BTC-USD'], linkGroup: 'A' },
+      { id: 'pane-2', idx: 2, fn: 'GP', instId: 'CR:SPOT:BTC-USD', compIds: ['EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:SSE:600519', 'CR:SPOT:BTC-USD'], linkGroup: 'A' },
+      { id: 'pane-3', idx: 3, fn: 'DES', instId: 'EQ:SSE:600519', compIds: ['EQ:SSE:600519', 'EQ:SZSE:300750', 'EQ:SSE:688981'], linkGroup: 'B' },
+      { id: 'pane-4', idx: 4, fn: 'PORT', instId: 'EQ:US:AAPL', compIds: ['EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:US:MSFT'], linkGroup: 'NONE' },
     ],
   };
 
-  // Format helpers
   function fmtCompact(v, ccy) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
     const sign = v < 0 ? '-' : '';
     const a = Math.abs(v);
-    const sym = ccy === 'CNY' ? '¥' : ccy === 'USD' ? '$' : '';
+    const sym = ccy === 'CNY' ? '¥' : ccy === 'USD' || ccy === 'USDT' ? '$' : '';
     if (a >= 1e12) return `${sign}${sym}${(a / 1e12).toFixed(2)}T`;
     if (a >= 1e9) return `${sign}${sym}${(a / 1e9).toFixed(2)}B`;
     if (a >= 1e6) return `${sign}${sym}${(a / 1e6).toFixed(2)}M`;
@@ -370,33 +622,18 @@
   }
   function fmtPx(v, ccy) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
-    const sym = ccy === 'CNY' ? '¥' : ccy === 'USD' ? '$' : '';
-    return `${sym}${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const sym = ccy === 'CNY' ? '¥' : ccy === 'USD' || ccy === 'USDT' ? '$' : '';
+    const d = Math.abs(v) < 10 ? 4 : 2;
+    return `${sym}${Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
   }
 
-  function resolveTicker(raw) {
-    const q = raw.trim().toUpperCase().replace(/<EQUITY>|<CRYPTO>|<FX>/g, '').trim();
-    if (!q) return null;
-    if (INSTRUMENTS[q]) return INSTRUMENTS[q];
-    for (const inst of Object.values(INSTRUMENTS)) {
-      if (inst.symbol.toUpperCase() === q) return inst;
-      if (inst.aliases.some((a) => a.toUpperCase() === q)) return inst;
-    }
-    const first = q.split(/\s+/)[0].replace(/\.(SS|SZ|BJ)$/i, '');
-    for (const inst of Object.values(INSTRUMENTS)) {
-      if (inst.symbol.toUpperCase() === first || inst.symbol.startsWith(first + '-')) return inst;
-    }
-    return null;
-  }
-
-  function executeCommand(rawCmd, targetPaneId) {
+  async function executeCommand(rawCmd, targetPaneId) {
     const errEl = document.getElementById('cmd-error');
     const cleaned = rawCmd.trim().replace(/\s+/g, ' ');
     if (!cleaned) return;
     const pane = state.panes.find((p) => p.id === (targetPaneId || state.activePaneId)) || state.panes[0];
     errEl.classList.add('hidden');
 
-    // Multi-security COMP
     if (cleaned.includes(',')) {
       const parts = cleaned.split(',').map((s) => s.trim());
       let fn = 'COMP';
@@ -405,37 +642,27 @@
         fn = lastToks.pop().toUpperCase();
         parts[parts.length - 1] = lastToks.join(' ');
       }
-      const ids = parts.map(resolveTicker).filter(Boolean).map((i) => i.id);
-      if (!ids.length) {
-        errEl.textContent = `CMD ERROR: Could not resolve securities in "${cleaned}"`;
+      const resolved = (await Promise.all(parts.map(resolveOrFetchTicker))).filter(Boolean);
+      if (!resolved.length) {
+        errEl.textContent = `LIVE RESOLVE ERROR: Could not load tickers in "${cleaned}"`;
         errEl.classList.remove('hidden');
         return;
       }
       pane.fn = fn;
-      pane.compIds = ids;
-      pane.instId = ids[0];
+      pane.compIds = resolved.map((i) => i.id);
+      pane.instId = resolved[0].id;
       renderWorkspace();
       return;
     }
 
     const toks = cleaned.split(' ');
     const up = toks.map((t) => t.toUpperCase());
-
-    // Standalone function switch (uses active pane security)
     if (FUNCTIONS.includes(up[0])) {
       pane.fn = up[0];
-      if (up[0] === 'NEWS' && toks[1]) {
-        const inst = resolveTicker(toks[1]);
-        if (inst) {
-          pane.instId = inst.id;
-          state.newsFilter.scopeActive = true;
-        }
-      }
       renderWorkspace();
       return;
     }
 
-    // Security + optional Function
     let fn = 'DES';
     let secStr = cleaned;
     for (let i = 1; i < up.length; i++) {
@@ -445,92 +672,78 @@
         break;
       }
     }
-    const resolved = resolveTicker(secStr);
+    const resolved = await resolveOrFetchTicker(secStr);
     if (!resolved) {
-      errEl.textContent = `CMD ERROR: Unknown ticker "${secStr}". Try AAPL US, NVDA US, 600519 CH, 300750 CH, 430047 BJ, BTC-USD, ETH-USD.`;
+      errEl.textContent = `LIVE RESOLVE ERROR: Could not find live feed for "${secStr}". Try AAPL US, TSLA US, 600519 CH, 000001 CH, BTC-USD, DOGE-USD.`;
       errEl.classList.remove('hidden');
       return;
     }
-
     pane.fn = fn;
     pane.instId = resolved.id;
-    // Propagate to linked panes in the same color group!
     if (pane.linkGroup !== 'NONE') {
-      state.panes.forEach((p) => {
-        if (p.id !== pane.id && p.linkGroup === pane.linkGroup) {
-          p.instId = resolved.id;
-        }
-      });
+      state.panes.forEach((p) => { if (p.id !== pane.id && p.linkGroup === pane.linkGroup) p.instId = resolved.id; });
     }
     renderWorkspace();
   }
 
   // =========================================================================
-  // 3. QUANTITATIVE ANALYTICS ENGINES (DCF, Portfolio Risk, BQL Backtester)
+  // 4. ANALYTICS ENGINES OVER REAL LIVE DATA
   // =========================================================================
   function calcDcf(inst, waccPct, fcfGPct, termGPct) {
+    if (!inst.fy.length || !inst.last) return null;
     const wacc = Math.max(termGPct / 100 + 0.01, waccPct / 100);
-    const tg = termGPct / 100;
-    const fg = fcfGPct / 100;
+    const tg = termGPct / 100, fg = fcfGPct / 100;
     const latest = inst.fy[inst.fy.length - 1];
     const baseFcf = Math.max(1e6, latest.ocf - latest.capex);
     const evalPx = (rw, rtg) => {
       if (rw <= rtg + 0.005) return null;
       let f = baseFcf, pvSum = 0;
       for (let yr = 1; yr <= 5; yr++) {
-        const g = fg - (fg - rtg) * ((yr - 1) / 9);
-        f *= (1 + g);
+        f *= (1 + fg - (fg - rtg) * ((yr - 1) / 9));
         pvSum += f / Math.pow(1 + rw, yr);
       }
-      const tv = (f * (1 + rtg)) / (rw - rtg);
-      const ev = pvSum + tv / Math.pow(1 + rw, 5);
-      const eq = ev + latest.cash - latest.debt;
-      return eq / inst.shares;
+      const ev = pvSum + ((f * (1 + rtg)) / (rw - rtg)) / Math.pow(1 + rw, 5);
+      return (ev + latest.cash - latest.debt) / inst.shares;
     };
     const fairPx = evalPx(wacc, tg) || 0;
     const spot = inst.last.close;
-    const upside = ((fairPx - spot) / spot) * 100;
     const wAxis = [-1.5, -0.75, 0, 0.75, 1.5].map((d) => Number(Math.max(4, waccPct + d).toFixed(2)));
     const tAxis = [-1.0, -0.5, 0, 0.5, 1.0].map((d) => Number(Math.max(0.5, termGPct + d).toFixed(2)));
-    const matrix = wAxis.map((w) => tAxis.map((t) => evalPx(w / 100, t / 100)));
-    return { fairPx, spot, upside, wAxis, tAxis, matrix };
+    return { fairPx, spot, upside: ((fairPx - spot) / spot) * 100, wAxis, tAxis, matrix: wAxis.map((w) => tAxis.map((t) => evalPx(w / 100, t / 100))) };
   }
 
   function computePortfolio(baseCcy) {
+    const usdCny = FX.USD_CNY || 7.0;
     const toBase = (ccy) => {
-      if (ccy === baseCcy) return 1.0;
-      if (ccy === 'CNY' && baseCcy === 'USD') return FX.CNY_USD;
-      if (ccy === 'USD' && baseCcy === 'CNY') return FX.USD_CNY;
+      if (ccy === baseCcy || (ccy === 'USD' && baseCcy === 'USDT')) return 1.0;
+      if (ccy === 'CNY' && (baseCcy === 'USD' || baseCcy === 'USDT')) return 1 / usdCny;
+      if ((ccy === 'USD' || ccy === 'USDT') && baseCcy === 'CNY') return usdCny;
       return 1.0;
     };
-    const usdToBase = baseCcy === 'CNY' ? FX.USD_CNY : 1.0;
+    const readyLots = PORTFOLIO_LOTS.filter((l) => INSTRUMENTS[l.id]?.candles?.length >= 30);
+    if (!readyLots.length) return null;
 
     let totalMv = 0, totalCost = 0;
-    const holdings = TRANSACTIONS.map((tx) => {
-      const inst = INSTRUMENTS[tx.id];
-      const fxNow = toBase(tx.ccy);
-      const fxTrade = tx.fxAtTrade * usdToBase;
-      const mvNative = tx.qty * inst.last.close;
-      const mvBase = mvNative * fxNow;
-      const costNative = tx.qty * tx.avgCost;
-      const costBase = costNative * fxTrade;
-      const pnlBase = mvBase - costBase;
-      const assetPnl = (mvNative - costNative) * fxNow;
-      const fxPnl = pnlBase - assetPnl;
+    const holdings = readyLots.map((lot) => {
+      const inst = INSTRUMENTS[lot.id];
+      const cs = inst.candles;
+      const entryPx = cs[Math.max(0, cs.length - 60)].close; // 60-bar historical entry price from REAL candles
+      const fxNow = toBase(lot.ccy);
+      const mvBase = lot.qty * inst.last.close * fxNow;
+      const costBase = lot.qty * entryPx * fxNow;
       totalMv += mvBase;
       totalCost += costBase;
-      return { ...tx, inst, mvBase, costBase, pnlBase, pnlPct: (pnlBase / costBase) * 100, assetPnl, fxPnl };
+      return { ...lot, inst, entryPx, mvBase, costBase, pnlBase: mvBase - costBase, pnlPct: ((mvBase - costBase) / costBase) * 100 };
     });
     holdings.forEach((h) => { h.weight = (h.mvBase / totalMv) * 100; });
 
-    // Portfolio daily returns & correlation matrix
+    const T = Math.min(...holdings.map((h) => h.inst.candles.length)) - 1;
     const retsByAsset = holdings.map((h) => {
-      const cs = h.inst.candles;
+      const cs = h.inst.candles.slice(-(T + 1));
       const arr = [];
       for (let i = 1; i < cs.length; i++) arr.push((cs[i].close - cs[i - 1].close) / cs[i - 1].close);
       return arr;
     });
-    const T = retsByAsset[0].length;
     const portRets = [];
     for (let t = 0; t < T; t++) {
       let r = 0;
@@ -538,53 +751,32 @@
       portRets.push(r);
     }
     const mean = portRets.reduce((a, b) => a + b, 0) / T;
-    const variance = portRets.reduce((a, b) => a + (b - mean) ** 2, 0) / (T - 1);
-    const std = Math.sqrt(variance);
-    const rfDaily = 0.042 / 252;
-    const sharpe = std > 0 ? ((mean - rfDaily) / std) * Math.sqrt(252) : 0;
-    const annRet = (Math.pow(1 + mean, 252) - 1) * 100;
-    const annVol = std * Math.sqrt(252) * 100;
-
+    const std = Math.sqrt(portRets.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, T - 1));
+    const sharpe = std > 0 ? ((mean - 0.042 / 252) / std) * Math.sqrt(252) : 0;
     let peak = 1, cum = 1, maxDd = 0;
-    portRets.forEach((r) => {
-      cum *= (1 + r);
-      if (cum > peak) peak = cum;
-      const dd = (cum - peak) / peak;
-      if (dd < maxDd) maxDd = dd;
-    });
-
+    portRets.forEach((r) => { cum *= (1 + r); peak = Math.max(peak, cum); maxDd = Math.min(maxDd, (cum - peak) / peak); });
     const sorted = [...portRets].sort((a, b) => a - b);
     const var95Pct = -sorted[Math.floor(T * 0.05)] * 100;
     const var99Pct = -sorted[Math.floor(T * 0.01)] * 100;
-    const portBeta = holdings.reduce((acc, h) => acc + (h.weight / 100) * h.inst.beta, 0);
+    const beta = holdings.reduce((acc, h) => acc + (h.weight / 100) * h.inst.beta, 0);
 
-    // Correlation Matrix
     const corr = holdings.map((_, i) => holdings.map((__, j) => {
-      if (i === j) return 1.0;
+      if (i === j) return 1;
       const a = retsByAsset[i], b = retsByAsset[j];
       const ma = a.reduce((x, y) => x + y, 0) / T, mb = b.reduce((x, y) => x + y, 0) / T;
       let num = 0, da = 0, db = 0;
-      for (let t = 0; t < T; t++) {
-        const xa = a[t] - ma, xb = b[t] - mb;
-        num += xa * xb; da += xa * xa; db += xb * xb;
-      }
+      for (let t = 0; t < T; t++) { const xa = a[t] - ma, xb = b[t] - mb; num += xa * xb; da += xa * xa; db += xb * xb; }
       return num / Math.sqrt(da * db || 1);
     }));
-
-    return {
-      totalMv, totalCost, unrealizedPnl: totalMv - totalCost,
-      unrealizedPct: ((totalMv - totalCost) / totalCost) * 100,
-      holdings, sharpe, annRet, annVol, maxDdPct: maxDd * 100, beta: portBeta,
-      var95Pct, var95Val: totalMv * var95Pct / 100, var99Pct, var99Val: totalMv * var99Pct / 100,
-      corr,
-    };
+    return { totalMv, totalCost, unrealizedPnl: totalMv - totalCost, unrealizedPct: ((totalMv - totalCost) / totalCost) * 100, holdings, sharpe, maxDdPct: maxDd * 100, beta, var95Pct, var99Pct, corr };
   }
 
   function runBqlTemplate(templateKey) {
     const t0 = performance.now();
+    const usdCny = FX.USD_CNY || 7.0;
     if (templateKey === 'cross_asset') {
-      const rows = Object.values(INSTRUMENTS).map((inst) => {
-        const fx = inst.ccy === 'CNY' ? FX.CNY_USD : 1.0;
+      const rows = Object.values(INSTRUMENTS).filter((i) => i.candles.length >= 31).map((inst) => {
+        const fx = inst.ccy === 'CNY' ? 1 / usdCny : 1.0;
         const c = inst.candles;
         const pNow = c[c.length - 1].close * fx;
         const p30 = c[c.length - 31].close * fx;
@@ -594,34 +786,23 @@
         const m = rets.reduce((a, b) => a + b, 0) / rets.length;
         const sd = Math.sqrt(rets.reduce((a, b) => a + (b - m) ** 2, 0) / (rets.length - 1));
         const annVol = sd * Math.sqrt(inst.market === 'CRYPTO' ? 365 : 252) * 100;
-        return {
-          symbol: inst.symbol, market: inst.market, last_usd: `$${pNow.toFixed(2)}`,
-          ret_30d_usd: `${ret30 >= 0 ? '+' : ''}${ret30.toFixed(2)}%`,
-          ann_vol: `${annVol.toFixed(1)}%`,
-          settlement: inst.settlement,
-        };
+        return { symbol: inst.symbol, market: inst.market, last_usd: `$${pNow.toFixed(2)}`, ret_30d_usd: `${ret30 >= 0 ? '+' : ''}${ret30.toFixed(2)}%`, ann_vol: `${annVol.toFixed(1)}%`, as_of: inst.liveUpdatedAt || '—' };
       }).sort((a, b) => parseFloat(b.ret_30d_usd) - parseFloat(a.ret_30d_usd));
-      return { cols: ['symbol', 'market', 'last_usd', 'ret_30d_usd', 'ann_vol', 'settlement'], rows, chart: null, ms: (performance.now() - t0).toFixed(2) };
+      return { cols: ['symbol', 'market', 'last_usd', 'ret_30d_usd', 'ann_vol', 'as_of'], rows, chart: null, ms: (performance.now() - t0).toFixed(2) };
     }
     if (templateKey === 'cn_micro') {
-      const rows = Object.values(INSTRUMENTS).filter((i) => i.market === 'CN_ASHARE').map((inst) => {
+      const rows = Object.values(INSTRUMENTS).filter((i) => i.market === 'CN_ASHARE' && i.last).map((inst) => {
         const up = roundCny(inst.prevClose * (1 + inst.limitPct));
         const dn = roundCny(inst.prevClose * (1 - inst.limitPct));
-        const nbLatest = inst.nbFlows[inst.nbFlows.length - 1].flow;
-        return {
-          code: `${inst.symbol} (${inst.localName})`, board: inst.board,
-          last_cny: `¥${inst.last.close.toFixed(2)}`,
-          limit_up: `¥${up.toFixed(2)}`, limit_down: `¥${dn.toFixed(2)}`,
-          nb_hold_pct: `${inst.nbHoldPct}%`, nb_flow_today: fmtCompact(nbLatest, 'CNY'),
-        };
+        const chg = ((inst.last.close - inst.prevClose) / inst.prevClose) * 100;
+        return { code: `${inst.symbol} ${inst.localName}`, board: inst.board, last_cny: `¥${inst.last.close.toFixed(2)}`, chg_pct: `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`, limit_up: `¥${up.toFixed(2)}`, limit_down: `¥${dn.toFixed(2)}`, date: inst.last.date };
       });
-      return { cols: ['code', 'board', 'last_cny', 'limit_up', 'limit_down', 'nb_hold_pct', 'nb_flow_today'], rows, chart: null, ms: (performance.now() - t0).toFixed(2) };
+      return { cols: ['code', 'board', 'last_cny', 'chg_pct', 'limit_up', 'limit_down', 'date'], rows, chart: null, ms: (performance.now() - t0).toFixed(2) };
     }
-    // Dual-SMA Momentum Backtest on BTC-USD
     const c = INSTRUMENTS['CR:SPOT:BTC-USD'].candles;
+    if (c.length < 35) return { cols: ['status'], rows: [{ status: 'Loading live BTC-USD candles...' }], chart: null, ms: '0' };
     let eq = 100, bm = 100, peak = 100, maxDd = 0, wins = 0, active = 0;
-    const stratRets = [];
-    const curve = [];
+    const stratRets = [], curve = [];
     for (let i = 30; i < c.length; i++) {
       const sma10 = c.slice(i - 10, i).reduce((s, x) => s + x.close, 0) / 10;
       const sma30 = c.slice(i - 30, i).reduce((s, x) => s + x.close, 0) / 30;
@@ -630,160 +811,96 @@
       const sr = sig * r;
       stratRets.push(sr);
       if (sig) { active++; if (sr > 0) wins++; }
-      eq *= (1 + sr);
-      bm *= (1 + r);
-      if (eq > peak) peak = eq;
-      maxDd = Math.min(maxDd, (eq - peak) / peak);
+      eq *= (1 + sr); bm *= (1 + r);
+      peak = Math.max(peak, eq); maxDd = Math.min(maxDd, (eq - peak) / peak);
       curve.push({ date: c[i].date, strategy: eq, benchmark: bm });
     }
     const mean = stratRets.reduce((a, b) => a + b, 0) / stratRets.length;
     const sd = Math.sqrt(stratRets.reduce((a, b) => a + (b - mean) ** 2, 0) / (stratRets.length - 1));
     const sharpe = sd > 0 ? (mean / sd) * Math.sqrt(365) : 0;
     return {
-      cols: ['strategy', 'total_return', 'buy_and_hold', 'sharpe', 'max_drawdown', 'win_rate'],
-      rows: [{
-        strategy: 'SMA(10)/SMA(30) Long/Flat on BTC-USD',
-        total_return: `${(eq - 100).toFixed(2)}%`,
-        buy_and_hold: `${(bm - 100).toFixed(2)}%`,
-        sharpe: sharpe.toFixed(2),
-        max_drawdown: `${(maxDd * 100).toFixed(2)}%`,
-        win_rate: `${active ? ((wins / active) * 100).toFixed(1) : '0.0'}%`,
-      }],
-      chart: curve,
-      ms: (performance.now() - t0).toFixed(2),
+      cols: ['strategy', 'bars', 'total_return', 'buy_and_hold', 'sharpe', 'max_drawdown', 'win_rate'],
+      rows: [{ strategy: 'LIVE BTC-USD SMA(10)/SMA(30)', bars: curve.length, total_return: `${(eq - 100).toFixed(2)}%`, buy_and_hold: `${(bm - 100).toFixed(2)}%`, sharpe: sharpe.toFixed(2), max_drawdown: `${(maxDd * 100).toFixed(2)}%`, win_rate: `${active ? ((wins / active) * 100).toFixed(1) : '0.0'}%` }],
+      chart: curve, ms: (performance.now() - t0).toFixed(2),
     };
   }
 
   // =========================================================================
-  // 4. HIGH-DPI CANVAS CHART RENDERERS (Theme-Aware!)
+  // 5. CANVAS RENDERERS
   // =========================================================================
-  function getThemeColors() {
-    const cs = getComputedStyle(document.documentElement);
-    const get = (k, fb) => (cs.getPropertyValue(k) || '').trim() || fb;
-    return {
-      bg: get('--background', '#0b0f17'),
-      card: get('--card', '#111827'),
-      border: get('--border', '#263245'),
-      text: get('--foreground', '#e5e7eb'),
-      muted: get('--muted-foreground', '#94a3b8'),
-      success: get('--success', '#10b981'),
-      error: get('--error', '#f43f5e'),
-      warning: get('--warning', '#f59e0b'),
-      primary: get('--primary', '#38bdf8'),
-      charts: [
-        get('--chart-1', '#f59e0b'),
-        get('--chart-2', '#38bdf8'),
-        get('--chart-3', '#10b981'),
-        get('--chart-4', '#f43f5e'),
-      ],
-    };
+  function getTheme() {
+    return { bg: '#070a0f', border: '#243146', text: '#e4eaf3', muted: '#8f9fb5', success: '#10b981', error: '#f43f5e', warning: '#f59e0b', primary: '#38bdf8', charts: ['#f59e0b', '#38bdf8', '#10b981', '#f43f5e'] };
   }
-
   function drawCandleChart(canvas, inst) {
-    if (!canvas) return;
+    if (!canvas || !inst?.candles?.length) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width < 40 || rect.height < 40) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    const W = rect.width, H = rect.height;
-    const th = getThemeColors();
-
-    ctx.fillStyle = th.bg;
-    ctx.fillRect(0, 0, W, H);
+    canvas.width = Math.floor(rect.width * dpr); canvas.height = Math.floor(rect.height * dpr);
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+    const W = rect.width, H = rect.height, th = getTheme();
+    ctx.fillStyle = th.bg; ctx.fillRect(0, 0, W, H);
 
     const bars = inst.candles.slice(-110);
-    const padL = 8, padR = 58, padT = 14, padB = 22;
-    const plotW = W - padL - padR;
-    const plotH = H - padT - padB;
+    const padL = 8, padR = 64, padT = 14, padB = 22;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
     const minP = Math.min(...bars.map((b) => b.low)) * 0.992;
     const maxP = Math.max(...bars.map((b) => b.high)) * 1.008;
-    const maxV = Math.max(...bars.map((b) => b.volume));
+    const maxV = Math.max(...bars.map((b) => b.volume)) || 1;
     const yOf = (p) => padT + ((maxP - p) / (maxP - minP || 1)) * (plotH * 0.82);
     const stepX = plotW / bars.length;
 
-    // Grid lines & price labels
-    ctx.strokeStyle = th.border;
-    ctx.lineWidth = 0.5;
-    ctx.font = '12px ui-monospace, monospace';
-    ctx.fillStyle = th.muted;
+    ctx.strokeStyle = th.border; ctx.lineWidth = 0.5; ctx.font = '11px ui-monospace, monospace'; ctx.fillStyle = th.muted;
     for (let g = 0; g <= 4; g++) {
-      const p = minP + (g / 4) * (maxP - minP);
-      const y = yOf(p);
+      const p = minP + (g / 4) * (maxP - minP), y = yOf(p);
       ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
       ctx.fillText(p >= 1000 ? p.toFixed(0) : p.toFixed(2), W - padR + 4, y + 4);
     }
 
-    // Volume Profile (horizontal bars on right edge)
     if (state.gpOverlays.vp) {
-      const bins = 16;
-      const hist = new Array(bins).fill(0);
-      bars.forEach((b) => {
-        const idx = Math.min(bins - 1, Math.max(0, Math.floor(((b.close - minP) / (maxP - minP || 1)) * bins)));
-        hist[idx] += b.volume;
-      });
-      const maxH = Math.max(...hist) || 1;
-      const poc = hist.indexOf(maxH);
+      const bins = 16, hist = new Array(bins).fill(0);
+      bars.forEach((b) => { hist[Math.min(bins - 1, Math.max(0, Math.floor(((b.close - minP) / (maxP - minP || 1)) * bins)))] += b.volume; });
+      const maxH = Math.max(...hist) || 1, poc = hist.indexOf(maxH);
       for (let i = 0; i < bins; i++) {
-        const p0 = minP + (i / bins) * (maxP - minP);
-        const p1 = minP + ((i + 1) / bins) * (maxP - minP);
-        const y0 = yOf(p1), y1 = yOf(p0);
+        const y0 = yOf(minP + ((i + 1) / bins) * (maxP - minP)), y1 = yOf(minP + (i / bins) * (maxP - minP));
         const bw = (hist[i] / maxH) * (plotW * 0.16);
-        ctx.fillStyle = i === poc ? th.warning : th.primary;
-        ctx.globalAlpha = i === poc ? 0.35 : 0.14;
+        ctx.fillStyle = i === poc ? th.warning : th.primary; ctx.globalAlpha = i === poc ? 0.35 : 0.14;
         ctx.fillRect(W - padR - bw, y0, bw, Math.max(1, y1 - y0 - 1));
       }
       ctx.globalAlpha = 1;
     }
 
-    // Volume histogram at bottom 18%
     const volBaseY = padT + plotH;
     bars.forEach((b, i) => {
-      const x = padL + i * stepX;
-      const vh = (b.volume / (maxV || 1)) * (plotH * 0.16);
-      ctx.fillStyle = b.close >= b.open ? th.success : th.error;
-      ctx.globalAlpha = 0.28;
+      const x = padL + i * stepX, vh = (b.volume / maxV) * (plotH * 0.16);
+      ctx.fillStyle = b.close >= b.open ? th.success : th.error; ctx.globalAlpha = 0.28;
       ctx.fillRect(x + 1, volBaseY - vh, Math.max(1, stepX - 2), vh);
     });
     ctx.globalAlpha = 1;
 
-    // Candlesticks
     bars.forEach((b, i) => {
-      const cx = padL + (i + 0.5) * stepX;
-      const isUp = b.close >= b.open;
-      ctx.strokeStyle = isUp ? th.success : th.error;
-      ctx.fillStyle = isUp ? th.success : th.error;
-      ctx.lineWidth = 1;
+      const cx = padL + (i + 0.5) * stepX, isUp = b.close >= b.open;
+      ctx.strokeStyle = isUp ? th.success : th.error; ctx.fillStyle = isUp ? th.success : th.error; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(cx, yOf(b.high)); ctx.lineTo(cx, yOf(b.low)); ctx.stroke();
-      const top = yOf(Math.max(b.open, b.close));
-      const bot = yOf(Math.min(b.open, b.close));
+      const top = yOf(Math.max(b.open, b.close)), bot = yOf(Math.min(b.open, b.close));
       ctx.fillRect(cx - Math.max(1.5, stepX * 0.32), top, Math.max(3, stepX * 0.64), Math.max(1.5, bot - top));
     });
 
-    // Moving averages
     const drawMa = (period, color) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      let started = false;
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath(); let s = false;
       for (let i = period - 1; i < bars.length; i++) {
-        const avg = bars.slice(i - period + 1, i + 1).reduce((s, x) => s + x.close, 0) / period;
+        const avg = bars.slice(i - period + 1, i + 1).reduce((a, x) => a + x.close, 0) / period;
         const x = padL + (i + 0.5) * stepX, y = yOf(avg);
-        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        if (!s) { ctx.moveTo(x, y); s = true; } else ctx.lineTo(x, y);
       }
       ctx.stroke();
     };
     if (state.gpOverlays.sma20) drawMa(20, th.warning);
     if (state.gpOverlays.sma50) drawMa(50, th.primary);
 
-    // Date axis labels
-    ctx.fillStyle = th.muted;
-    ctx.font = '12px ui-monospace, monospace';
+    ctx.fillStyle = th.muted; ctx.font = '11px ui-monospace, monospace';
     [0, Math.floor(bars.length / 2), bars.length - 1].forEach((idx) => {
-      const x = Math.min(W - padR - 68, padL + idx * stepX);
-      ctx.fillText(bars[idx].date.slice(5), x, H - 5);
+      ctx.fillText(bars[idx].date.slice(5), Math.min(W - padR - 48, padL + idx * stepX), H - 5);
     });
   }
 
@@ -792,66 +909,52 @@
     const rect = canvas.getBoundingClientRect();
     if (rect.width < 40 || rect.height < 40) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    const W = rect.width, H = rect.height;
-    const th = getThemeColors();
-    ctx.fillStyle = th.bg;
-    ctx.fillRect(0, 0, W, H);
-
+    canvas.width = Math.floor(rect.width * dpr); canvas.height = Math.floor(rect.height * dpr);
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+    const W = rect.width, H = rect.height, th = getTheme();
+    ctx.fillStyle = th.bg; ctx.fillRect(0, 0, W, H);
     const allVals = seriesList.flatMap((s) => s.values);
-    const minV = Math.min(...allVals) * 0.98;
-    const maxV = Math.max(...allVals) * 1.02;
+    const minV = Math.min(...allVals) * 0.98, maxV = Math.max(...allVals) * 1.02;
     const padL = 10, padR = 52, padT = 14, padB = 20;
     const yOf = (v) => padT + ((maxV - v) / (maxV - minV || 1)) * (H - padT - padB);
-
-    ctx.strokeStyle = th.border; ctx.lineWidth = 0.5;
-    ctx.font = '12px ui-monospace, monospace'; ctx.fillStyle = th.muted;
+    ctx.strokeStyle = th.border; ctx.lineWidth = 0.5; ctx.font = '11px ui-monospace, monospace'; ctx.fillStyle = th.muted;
     for (let g = 0; g <= 3; g++) {
-      const v = minV + (g / 3) * (maxV - minV);
-      const y = yOf(v);
+      const v = minV + (g / 3) * (maxV - minV), y = yOf(v);
       ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
       ctx.fillText(v.toFixed(0), W - padR + 5, y + 4);
     }
-
     seriesList.forEach((s, idx) => {
-      ctx.strokeStyle = s.color || th.charts[idx % th.charts.length];
-      ctx.lineWidth = 2;
-      ctx.beginPath();
+      ctx.strokeStyle = s.color || th.charts[idx % th.charts.length]; ctx.lineWidth = 2; ctx.beginPath();
       const step = (W - padL - padR) / Math.max(1, s.values.length - 1);
-      s.values.forEach((v, i) => {
-        const x = padL + i * step, y = yOf(v);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
+      s.values.forEach((v, i) => { const x = padL + i * step, y = yOf(v); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
       ctx.stroke();
     });
   }
 
   // =========================================================================
-  // 5. MODULE RENDERERS (DES, FA/DCF, GP, COMP, NEWS, PORT, BQL)
+  // 6. MODULE RENDERERS (ALL 10 FUNCTIONS OVER REAL LIVE DATA)
   // =========================================================================
+  function loadingBox(inst) {
+    if (inst.loadError) return `<div class="p-4 mono text-xs text-[var(--error)]">LIVE FEED ERROR for ${inst.symbol}: ${inst.loadError} — Click ↻ LIVE SYNC to retry.</div>`;
+    return `<div class="p-4 mono text-xs text-[var(--muted-foreground)] animate-pulse">Fetching live market data for ${inst.symbol} (${inst.market})...</div>`;
+  }
+
   function renderDes(inst) {
+    if (!inst.last) return loadingBox(inst);
     const chg = inst.last.close - inst.prevClose;
     const chgPct = (chg / inst.prevClose) * 100;
     const pos = chg >= 0;
     const latestFy = inst.fy[inst.fy.length - 1];
-    const mcap = inst.last.close * inst.shares;
-    const ev = mcap + latestFy.debt - latestFy.cash;
-    const pe = latestFy.ni > 0 ? (mcap / latestFy.ni).toFixed(1) + 'x' : '—';
-    const evEbitda = latestFy.ebitda > 0 ? (ev / latestFy.ebitda).toFixed(1) + 'x' : '—';
+    const mcap = inst.shares ? inst.last.close * inst.shares : null;
+    const pe = (mcap && latestFy?.ni > 0) ? (mcap / latestFy.ni).toFixed(1) + 'x' : '—';
+    const ev = (mcap && latestFy) ? mcap + latestFy.debt - latestFy.cash : null;
+    const evEbitda = (ev && latestFy?.ebitda > 0) ? (ev / latestFy.ebitda).toFixed(1) + 'x' : '—';
     const rangePct = Math.max(0, Math.min(100, ((inst.last.close - inst.low52) / (inst.high52 - inst.low52 || 1)) * 100));
 
     let microHtml = '';
     if (inst.market === 'CN_ASHARE') {
       const up = roundCny(inst.prevClose * (1 + inst.limitPct));
       const dn = roundCny(inst.prevClose * (1 - inst.limitPct));
-      const nbLatest = inst.nbFlows[inst.nbFlows.length - 1].flow;
-      const barsHtml = inst.nbFlows.map((f) => {
-        const h = Math.max(12, Math.min(100, (Math.abs(f.flow) / 7e8) * 100));
-        return `<div class="flex-1 flex flex-col justify-end h-full" title="${f.date}: ${fmtCompact(f.flow, 'CNY')}"><div style="height:${h}%;background:${f.flow >= 0 ? 'var(--error)' : 'var(--success)'};opacity:0.8" class="w-full rounded-t-sm"></div></div>`;
-      }).join('');
       microHtml = `
         <div class="p-2.5 rounded bg-[var(--background)] border border-[var(--border)] space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs mono">
@@ -865,26 +968,23 @@
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mono text-xs">
             <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">涨停 LIMIT-UP</div><div class="font-bold text-[var(--error)]">¥${up.toFixed(2)}</div></div>
             <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">跌停 LIMIT-DOWN</div><div class="font-bold text-[var(--success)]">¥${dn.toFixed(2)}</div></div>
-            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">北向持股 HOLD</div><div class="font-bold text-[var(--primary)]">${inst.nbHoldPct}%</div><div class="text-[var(--muted-foreground)]">Net: ${fmtCompact(nbLatest, 'CNY')}</div></div>
-            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">换手率 · 融资</div><div class="font-bold">${inst.turnoverPct}%</div><div class="text-[var(--muted-foreground)]">${fmtCompact(inst.marginBalCny, 'CNY')}</div></div>
+            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">TURNOVER (LIVE)</div><div class="font-bold text-[var(--primary)]">${fmtCompact(inst.last.turnover, 'CNY')}</div></div>
+            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">VOLUME (SHARES)</div><div class="font-bold">${fmtCompact(inst.last.volume)}</div></div>
           </div>
-          <div class="text-xs mono text-[var(--muted-foreground)]">20D NORTHBOUND DAILY FLOWS (北向资金净流入)</div>
-          <div class="flex items-end gap-1 h-12 p-1 rounded bg-[var(--card)] border border-[var(--card-border)]">${barsHtml}</div>
         </div>`;
     } else if (inst.market === 'CRYPTO') {
       const cr = inst.crypto;
-      const dexShare = ((cr.dexVol / (cr.cexVol + cr.dexVol)) * 100).toFixed(1);
       microHtml = `
         <div class="p-2.5 rounded bg-[var(--background)] border border-[var(--border)] space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs mono">
-            <span class="font-semibold text-[var(--warning)]">CRYPTO DERIVATIVES, LIQUIDITY & ON-CHAIN</span>
-            <span class="px-1.5 py-0.5 rounded bg-[var(--card)] border border-[var(--success)] text-[var(--success)]">24/7 CONTINUOUS · T+0</span>
+            <span class="font-semibold text-[var(--warning)]">LIVE CRYPTO PERP, FUNDING, OI & DEFILLAMA TVL</span>
+            <span class="px-1.5 py-0.5 rounded bg-[var(--card)] border border-[var(--success)] text-[var(--success)]">24/7 LIVE · ${wsStatus}</span>
           </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mono text-xs">
-            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">8H FUNDING</div><div class="font-bold text-[var(--success)]">+${(cr.funding8h * 100).toFixed(4)}%</div><div class="text-[var(--muted-foreground)]">Ann: ${(cr.funding8h * 3 * 365 * 100).toFixed(1)}%</div></div>
-            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">OPEN INTEREST</div><div class="font-bold text-[var(--primary)]">${fmtCompact(cr.oiUsd, 'USD')}</div><div class="text-[var(--muted-foreground)]">Basis: +${cr.basisBps} bps</div></div>
-            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">CEX / DEX 24H</div><div class="font-bold">${fmtCompact(cr.cexVol, 'USD')}</div><div class="text-[var(--warning)]">DEX Share: ${dexShare}%</div></div>
-            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">TVL / ADDR</div><div class="font-bold text-[var(--success)]">${cr.tvlUsd ? fmtCompact(cr.tvlUsd, 'USD') : 'PoW L1'}</div><div class="text-[var(--muted-foreground)]">${fmtCompact(cr.activeAddr)}/24h</div></div>
+            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">OKX 8H FUNDING</div><div class="font-bold ${(cr.funding8h ?? 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${cr.funding8h !== null ? (cr.funding8h * 100).toFixed(4) + '%' : '—'}</div><div class="text-[var(--muted-foreground)]">Ann: ${cr.funding8h !== null ? (cr.funding8h * 3 * 365 * 100).toFixed(2) + '%' : '—'}</div></div>
+            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">OKX OPEN INTEREST</div><div class="font-bold text-[var(--primary)]">${fmtCompact(cr.oiUsd, 'USD')}</div><div class="text-[var(--muted-foreground)]">${cr.oiCoins ? fmtCompact(cr.oiCoins) + ' ' + inst.symbol.split('-')[0] : ''}</div></div>
+            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">24H SPOT VOL</div><div class="font-bold">${fmtCompact(cr.vol24hUsd || inst.last.turnover, 'USD')}</div><div class="text-[var(--warning)]">Global DEX: ${fmtCompact(DEFI_GLOBAL.dex24hUsd, 'USD')}</div></div>
+            <div class="p-2 rounded bg-[var(--card)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">DEFILLAMA TVL</div><div class="font-bold text-[var(--success)]">${cr.tvlUsd ? fmtCompact(cr.tvlUsd, 'USD') : '—'}</div><div class="text-[var(--muted-foreground)]">${inst.llamaChain || 'L1'}</div></div>
           </div>
         </div>`;
     } else {
@@ -892,10 +992,10 @@
       microHtml = `
         <div class="p-2.5 rounded bg-[var(--background)] border border-[var(--border)] space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs mono">
-            <span class="font-semibold text-[var(--primary)]">US EQUITY MICROSTRUCTURE · EXTENDED HOURS & SEC 13F</span>
-            <span>CIK ${inst.cik} · PRE ${fmtPx(inst.last.close * 1.004, 'USD')} · POST ${fmtPx(inst.last.close * 0.999, 'USD')}</span>
+            <span class="font-semibold text-[var(--primary)]">US EQUITY · LIVE OHLCV & SEC 13F OWNERSHIP</span>
+            <span>CIK ${inst.cik || '—'} · VOL ${fmtCompact(inst.last.volume)} · TURNOVER ${fmtCompact(inst.last.turnover, 'USD')}</span>
           </div>
-          <div class="overflow-x-auto"><table class="term-table"><thead><tr><th class="text-left">Top 13F Institutional Holder</th><th class="text-right">% Out</th><th class="text-right">QoQ Chg</th></tr></thead><tbody>${holders}</tbody></table></div>
+          ${holders ? `<div class="overflow-x-auto"><table class="term-table"><thead><tr><th class="text-left">Top 13F Holder</th><th class="text-right">% Out</th><th class="text-right">QoQ</th></tr></thead><tbody>${holders}</tbody></table></div>` : ''}
         </div>`;
     }
 
@@ -906,10 +1006,10 @@
             <div class="flex items-center gap-2 flex-wrap">
               <span class="mono text-base font-bold text-[var(--warning)]">${inst.symbol}</span>
               <span class="text-sm font-semibold">${inst.name}</span>
-              ${inst.localName ? `<span class="text-sm font-medium text-[var(--primary)]">${inst.localName}</span>` : ''}
+              ${inst.localName && inst.localName !== inst.name ? `<span class="text-sm font-medium text-[var(--primary)]">${inst.localName}</span>` : ''}
             </div>
             <div class="flex flex-wrap gap-1.5 mt-1 mono text-xs text-[var(--muted-foreground)]">
-              <span class="px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--border)]">${inst.id}</span>
+              <span class="px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--success)] text-[var(--success)]">${inst.liveSource} (${inst.liveUpdatedAt})</span>
               <span class="px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--border)]">${inst.exchange}</span>
               <span class="px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--border)]">${inst.settlement}</span>
             </div>
@@ -919,280 +1019,111 @@
             <div class="font-semibold ${pos ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${pos ? '+' : ''}${chg.toFixed(2)} (${pos ? '+' : ''}${chgPct.toFixed(2)}%)</div>
           </div>
         </div>
-
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mono">
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">OPEN / HIGH / LOW</div><div class="font-bold">${fmtPx(inst.last.open)} / ${fmtPx(inst.last.high)} / ${fmtPx(inst.last.low)}</div></div>
           <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">MKT CAP</div><div class="font-bold">${fmtCompact(mcap, inst.ccy)}</div></div>
           <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">P/E · EV/EBITDA</div><div class="font-bold text-[var(--primary)]">${pe} · ${evEbitda}</div></div>
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">CASH / DEBT</div><div class="font-bold">${fmtCompact(latestFy.cash, inst.ccy)} / ${fmtCompact(latestFy.debt, inst.ccy)}</div></div>
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">52W RANGE</div><div class="font-bold">${fmtPx(inst.low52)} – ${fmtPx(inst.high52)}</div><div class="mt-1 h-1.5 rounded bg-[var(--border)] relative"><div class="absolute top-0 bottom-0 w-1.5 rounded bg-[var(--warning)]" style="left:calc(${rangePct}% - 3px)"></div></div></div>
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">180D RANGE</div><div class="font-bold">${fmtPx(inst.low52)} – ${fmtPx(inst.high52)}</div><div class="mt-1 h-1.5 rounded bg-[var(--border)] relative"><div class="absolute top-0 bottom-0 w-1.5 rounded bg-[var(--warning)]" style="left:calc(${rangePct}% - 3px)"></div></div></div>
         </div>
-
         ${microHtml}
-
-        <div class="p-2.5 rounded bg-[var(--background)] border border-[var(--card-border)]">
-          <div class="mono text-[var(--muted-foreground)] mb-1">PROFILE SUMMARY</div>
-          <p class="leading-relaxed">${inst.desc}</p>
-        </div>
+        <div class="p-2.5 rounded bg-[var(--background)] border border-[var(--card-border)]"><p class="leading-relaxed text-[var(--muted-foreground)]">${inst.desc}</p></div>
       </div>`;
   }
 
   function renderFa(inst) {
+    if (!inst.last) return loadingBox(inst);
+    if (!inst.fy.length) return `<div class="p-4 mono text-xs text-[var(--muted-foreground)]">No standardized annual statements cached for dynamically added ticker ${inst.symbol}. Run FA on AAPL, NVDA, MSFT, 600519, 300750, 688981, BTC-USD, or ETH-USD.</div>`;
     const latest = inst.fy[inst.fy.length - 1];
     const mcap = inst.last.close * inst.shares;
     const fcf = latest.ocf - latest.capex;
     const gm = latest.rev > 0 ? ((latest.gp / latest.rev) * 100).toFixed(1) + '%' : '—';
     const nm = latest.rev > 0 ? ((latest.ni / latest.rev) * 100).toFixed(1) + '%' : '—';
-    const fcfYld = mcap > 0 ? ((fcf / mcap) * 100).toFixed(2) + '%' : '—';
-
     const tabs = [['IS', 'INCOME STMT'], ['BS', 'BALANCE SHEET'], ['CF', 'CASH FLOW'], ['DCF', 'DCF MODEL']]
-      .map(([k, lbl]) => `<button data-fa-tab="${k}" class="px-2 py-1 rounded mono text-xs font-semibold cursor-pointer ${state.faTab === k ? 'bg-[var(--warning)] text-black' : 'bg-[var(--background)] text-[var(--muted-foreground)] border border-[var(--border)]'}">${lbl}</button>`)
-      .join('');
+      .map(([k, lbl]) => `<button data-fa-tab="${k}" class="px-2 py-1 rounded mono text-xs font-semibold cursor-pointer ${state.faTab === k ? 'bg-[var(--warning)] text-black' : 'bg-[var(--background)] text-[var(--muted-foreground)] border border-[var(--border)]'}">${lbl}</button>`).join('');
 
     let bodyHtml = '';
     if (state.faTab !== 'DCF') {
-      const specs = state.faTab === 'IS'
-        ? [['rev', 'Total Revenue / Fees'], ['gp', 'Gross Profit'], ['ebitda', 'EBITDA'], ['ni', 'Net Income']]
-        : state.faTab === 'BS'
-        ? [['assets', 'Total Assets'], ['cash', 'Cash & Equivalents / TVL'], ['debt', 'Total Debt'], ['eq', 'Shareholders Equity']]
-        : [['ocf', 'Operating Cash Flow'], ['capex', 'Capital Expenditure'], ['fcf', 'Free Cash Flow (FCF)']];
-
+      const specs = state.faTab === 'IS' ? [['rev', 'Total Revenue / Fees'], ['gp', 'Gross Profit'], ['ebitda', 'EBITDA'], ['ni', 'Net Income']]
+        : state.faTab === 'BS' ? [['assets', 'Total Assets'], ['cash', 'Cash & Equivalents'], ['debt', 'Total Debt'], ['eq', 'Shareholders Equity']]
+        : [['ocf', 'Operating Cash Flow'], ['capex', 'Capital Expenditure'], ['fcf', 'Free Cash Flow']];
       const headers = inst.fy.map((f) => `<th class="text-right">${f.yr}</th>`).join('');
       const rows = specs.map(([key, label]) => {
         const cells = inst.fy.map((f, i) => {
           const val = key === 'fcf' ? (f.ocf - f.capex) : f[key];
-          let yoyHtml = '';
+          let yoy = '';
           if (i > 0) {
             const prev = key === 'fcf' ? (inst.fy[i - 1].ocf - inst.fy[i - 1].capex) : inst.fy[i - 1][key];
-            if (Math.abs(prev) > 1e-6) {
-              const g = ((val - prev) / Math.abs(prev)) * 100;
-              yoyHtml = `<div class="${g >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}% YoY</div>`;
-            }
+            if (Math.abs(prev) > 1e-6) { const g = ((val - prev) / Math.abs(prev)) * 100; yoy = `<div class="${g >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}% YoY</div>`; }
           }
-          return `<td class="text-right mono"><div>${fmtCompact(val, inst.ccy)}</div>${yoyHtml}</td>`;
+          return `<td class="text-right mono"><div>${fmtCompact(val, inst.ccy)}</div>${yoy}</td>`;
         }).join('');
         return `<tr><td class="font-medium">${label}</td>${cells}</tr>`;
       }).join('');
       bodyHtml = `<div class="overflow-x-auto flex-1"><table class="term-table"><thead><tr><th class="text-left">Line Item (${inst.ccy})</th>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`;
     } else {
       const d = calcDcf(inst, state.dcfParams.wacc, state.dcfParams.fcfG, state.dcfParams.termG);
-      const matrixRows = d.wAxis.map((w, r) => {
-        const tds = d.matrix[r].map((px, c) => {
-          const center = r === 2 && c === 2;
-          const up = px !== null && px >= d.spot;
-          return `<td class="text-right mono ${center ? 'font-bold text-[var(--warning)]' : up ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${px !== null ? fmtPx(px, inst.ccy) : 'N/A'}</td>`;
-        }).join('');
-        return `<tr><td class="mono font-semibold text-[var(--warning)]">${w.toFixed(2)}%</td>${tds}</tr>`;
-      }).join('');
+      const matrixRows = d.wAxis.map((w, r) => `<tr><td class="mono font-semibold text-[var(--warning)]">${w.toFixed(2)}%</td>${d.matrix[r].map((px, c) => `<td class="text-right mono ${r === 2 && c === 2 ? 'font-bold text-[var(--warning)]' : px >= d.spot ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${px !== null ? fmtPx(px, inst.ccy) : 'N/A'}</td>`).join('')}</tr>`).join('');
       bodyHtml = `
         <div class="p-3 space-y-3 overflow-y-auto flex-1">
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 p-2.5 rounded bg-[var(--background)] border border-[var(--border)] mono text-xs">
-            <label class="block">WACC: <strong class="text-[var(--warning)]">${state.dcfParams.wacc.toFixed(1)}%</strong>
-              <input data-dcf="wacc" type="range" min="5.5" max="17" step="0.5" value="${state.dcfParams.wacc}" class="w-full accent-[var(--warning)] mt-1" />
-            </label>
-            <label class="block">5Y FCF Growth: <strong class="text-[var(--primary)]">${state.dcfParams.fcfG.toFixed(1)}%</strong>
-              <input data-dcf="fcfG" type="range" min="-5" max="32" step="1" value="${state.dcfParams.fcfG}" class="w-full accent-[var(--primary)] mt-1" />
-            </label>
-            <label class="block">Terminal g: <strong class="text-[var(--success)]">${state.dcfParams.termG.toFixed(1)}%</strong>
-              <input data-dcf="termG" type="range" min="1" max="5" step="0.25" value="${state.dcfParams.termG}" class="w-full accent-[var(--success)] mt-1" />
-            </label>
+            <label>WACC: <strong class="text-[var(--warning)]">${state.dcfParams.wacc.toFixed(1)}%</strong><input data-dcf="wacc" type="range" min="5.5" max="17" step="0.5" value="${state.dcfParams.wacc}" class="w-full accent-[var(--warning)] mt-1" /></label>
+            <label>5Y FCF Growth: <strong class="text-[var(--primary)]">${state.dcfParams.fcfG.toFixed(1)}%</strong><input data-dcf="fcfG" type="range" min="-5" max="32" step="1" value="${state.dcfParams.fcfG}" class="w-full accent-[var(--primary)] mt-1" /></label>
+            <label>Terminal g: <strong class="text-[var(--success)]">${state.dcfParams.termG.toFixed(1)}%</strong><input data-dcf="termG" type="range" min="1" max="5" step="0.25" value="${state.dcfParams.termG}" class="w-full accent-[var(--success)] mt-1" /></label>
           </div>
           <div class="grid grid-cols-3 gap-2 mono text-xs">
             <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">IMPLIED FAIR VALUE</div><div class="text-sm font-bold text-[var(--warning)]">${fmtPx(d.fairPx, inst.ccy)}</div></div>
-            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">CURRENT SPOT</div><div class="text-sm font-bold">${fmtPx(d.spot, inst.ccy)}</div></div>
-            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">IMPLIED UPSIDE</div><div class="text-sm font-bold ${d.upside >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${d.upside >= 0 ? '+' : ''}${d.upside.toFixed(1)}%</div></div>
+            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">LIVE SPOT PRICE</div><div class="text-sm font-bold">${fmtPx(d.spot, inst.ccy)}</div></div>
+            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">UPSIDE vs LIVE</div><div class="text-sm font-bold ${d.upside >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${d.upside >= 0 ? '+' : ''}${d.upside.toFixed(1)}%</div></div>
           </div>
-          <div class="overflow-x-auto">
-            <div class="mono text-xs text-[var(--muted-foreground)] mb-1">5×5 SENSITIVITY MATRIX — WACC (Rows) vs TERMINAL GROWTH (Cols)</div>
-            <table class="term-table"><thead><tr><th class="text-left">WACC \\ g</th>${d.tAxis.map((t) => `<th class="text-right">${t.toFixed(2)}%</th>`).join('')}</tr></thead><tbody>${matrixRows}</tbody></table>
-          </div>
+          <div class="overflow-x-auto"><table class="term-table"><thead><tr><th class="text-left">WACC \\ g</th>${d.tAxis.map((t) => `<th class="text-right">${t.toFixed(2)}%</th>`).join('')}</tr></thead><tbody>${matrixRows}</tbody></table></div>
         </div>`;
     }
-
-    return `
-      <div class="h-full flex flex-col overflow-hidden text-xs">
-        <div class="px-3 py-2 bg-[var(--background)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
-          <div class="flex flex-wrap gap-1">${tabs}</div>
-          <div class="flex flex-wrap gap-2 mono text-xs text-[var(--muted-foreground)]">
-            <span>STD: <strong class="text-[var(--primary)]">${inst.finStd}</strong></span>
-            <span>GM: <strong>${gm}</strong></span>
-            <span>NM: <strong>${nm}</strong></span>
-            <span>FCF YLD: <strong>${fcfYld}</strong></span>
-          </div>
-        </div>
-        ${bodyHtml}
-      </div>`;
+    return `<div class="h-full flex flex-col overflow-hidden text-xs"><div class="px-3 py-2 bg-[var(--background)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2"><div class="flex flex-wrap gap-1">${tabs}</div><div class="flex flex-wrap gap-2 mono text-[var(--muted-foreground)]"><span>${inst.finStd}</span><span>GM: <strong>${gm}</strong></span><span>NM: <strong>${nm}</strong></span><span>FCF YLD: <strong>${((fcf / mcap) * 100).toFixed(2)}%</strong></span></div></div>${bodyHtml}</div>`;
   }
 
   function renderGp(pane, inst) {
+    if (!inst.candles.length) return loadingBox(inst);
     const ov = state.gpOverlays;
-    const evRibbon = (inst.events || []).map((e) => `<span class="px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--border)] mono text-xs"><strong class="text-[var(--warning)]">${e.type}</strong> ${e.title}</span>`).join('');
     return `
       <div class="h-full flex flex-col overflow-hidden text-xs">
         <div class="px-2.5 py-1.5 bg-[var(--background)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2 mono">
-          <span>${inst.symbol} · 1D CANDLES + VOL PROFILE</span>
-          <div class="flex flex-wrap gap-1">
-            ${[['sma20', 'SMA20'], ['sma50', 'SMA50'], ['vp', 'VOL PROF']].map(([k, lbl]) => `
-              <button data-gp-ov="${k}" class="px-1.5 py-0.5 rounded border text-xs cursor-pointer ${ov[k] ? 'border-[var(--warning)] text-[var(--warning)] font-semibold' : 'border-[var(--border)] text-[var(--muted-foreground)]'}">${lbl}</button>
-            `).join('')}
-          </div>
+          <span>${inst.symbol} · LIVE 1D OHLCV (${inst.liveSource})</span>
+          <div class="flex flex-wrap gap-1">${[['sma20', 'SMA20'], ['sma50', 'SMA50'], ['vp', 'VOL PROF']].map(([k, lbl]) => `<button data-gp-ov="${k}" class="px-1.5 py-0.5 rounded border cursor-pointer ${ov[k] ? 'border-[var(--warning)] text-[var(--warning)] font-semibold' : 'border-[var(--border)] text-[var(--muted-foreground)]'}">${lbl}</button>`).join('')}</div>
         </div>
-        <div class="flex-1 min-h-[220px] relative"><canvas id="gp-canvas-${pane.id}" class="w-full h-full"></canvas></div>
-        <div class="px-2.5 py-1.5 bg-[var(--background)] border-t border-[var(--border)] flex flex-wrap gap-1.5">${evRibbon}</div>
+        <div class="flex-1 min-h-[240px] relative"><canvas id="gp-canvas-${pane.id}" class="w-full h-full"></canvas></div>
       </div>`;
   }
 
   function renderComp(pane) {
-    const ccy = state.compBaseCcy;
-    const toBase = (c) => c === ccy ? 1 : (c === 'CNY' && ccy === 'USD' ? FX.CNY_USD : FX.USD_CNY);
+    const ccy = state.compBaseCcy, usdCny = FX.USD_CNY || 7.0;
+    const toBase = (c) => c === ccy ? 1 : (c === 'CNY' && ccy === 'USD' ? 1 / usdCny : usdCny);
     const rows = pane.compIds.map((id) => {
       const inst = INSTRUMENTS[id];
-      if (!inst) return '';
-      const fx = toBase(inst.ccy);
-      const c = inst.candles;
-      const ret = ((c[c.length - 1].close / c[c.length - 91].close) - 1) * 100;
+      if (!inst?.last) return '';
+      const fx = toBase(inst.ccy), c = inst.candles;
+      const ret = c.length > 60 ? ((c[c.length - 1].close / c[c.length - 61].close) - 1) * 100 : 0;
+      const mcap = inst.shares ? inst.last.close * inst.shares * fx : null;
       const fy = inst.fy[inst.fy.length - 1];
-      const mcap = inst.last.close * inst.shares * fx;
-      const pe = fy.ni > 0 ? (mcap / (fy.ni * fx)).toFixed(1) + 'x' : '—';
+      const pe = (mcap && fy?.ni > 0) ? (mcap / (fy.ni * fx)).toFixed(1) + 'x' : '—';
       return `<tr><td class="mono font-semibold text-[var(--warning)]">${inst.symbol}</td><td>${inst.market}</td><td class="text-right mono">${fmtPx(inst.last.close * fx, ccy)}</td><td class="text-right mono">${fmtCompact(mcap, ccy)}</td><td class="text-right mono text-[var(--primary)]">${pe}</td><td class="text-right mono font-semibold ${ret >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${ret >= 0 ? '+' : ''}${ret.toFixed(1)}%</td></tr>`;
     }).join('');
     return `
       <div class="h-full flex flex-col overflow-hidden text-xs">
         <div class="px-3 py-1.5 bg-[var(--background)] border-b border-[var(--border)] flex items-center justify-between mono">
-          <span>FX-NORMALIZED PEER COMPARISON (${pane.compIds.length} ASSETS)</span>
-          <div class="flex gap-1">
-            ${['USD', 'CNY'].map((c) => `<button data-comp-ccy="${c}" class="px-2 py-0.5 rounded border cursor-pointer ${ccy === c ? 'border-[var(--warning)] text-[var(--warning)] font-bold' : 'border-[var(--border)] text-[var(--muted-foreground)]'}">${c}</button>`).join('')}
-          </div>
+          <span>LIVE FX-NORMALIZED PEER COMPARISON (USD/CNY=${usdCny.toFixed(4)})</span>
+          <div class="flex gap-1">${['USD', 'CNY'].map((c) => `<button data-comp-ccy="${c}" class="px-2 py-0.5 rounded border cursor-pointer ${ccy === c ? 'border-[var(--warning)] text-[var(--warning)] font-bold' : 'border-[var(--border)] text-[var(--muted-foreground)]'}">${c}</button>`).join('')}</div>
         </div>
         <div class="h-40 border-b border-[var(--border)]"><canvas id="comp-canvas-${pane.id}" class="w-full h-full"></canvas></div>
-        <div class="flex-1 overflow-auto"><table class="term-table"><thead><tr><th class="text-left">Ticker</th><th class="text-left">Mkt</th><th class="text-right">Price (${ccy})</th><th class="text-right">Mkt Cap (${ccy})</th><th class="text-right">P/E</th><th class="text-right">90D Ret</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="flex-1 overflow-auto"><table class="term-table"><thead><tr><th class="text-left">Ticker</th><th class="text-left">Mkt</th><th class="text-right">Live Px (${ccy})</th><th class="text-right">Mkt Cap (${ccy})</th><th class="text-right">P/E</th><th class="text-right">60D Ret</th></tr></thead><tbody>${rows}</tbody></table></div>
       </div>`;
-  }
-
-  function renderNews(pane) {
-    const f = state.newsFilter;
-    const filtered = NEWS_ITEMS.filter((n) => {
-      if (f.scopeActive && !n.tickers.includes(pane.instId)) return false;
-      if (f.sentiment && n.label !== f.sentiment) return false;
-      if (f.lang && n.lang !== f.lang) return false;
-      return true;
-    });
-    const listHtml = filtered.map((n) => `
-      <article class="p-2.5 border-b border-[var(--card-border)] space-y-1">
-        <div class="flex items-center justify-between gap-2 mono text-xs">
-          <span class="text-[var(--warning)]">${n.src} · <span class="text-[var(--muted-foreground)]">${n.ts}</span></span>
-          <span class="px-1.5 py-0.5 rounded border ${n.label === 'BULLISH' ? 'border-[var(--success)] text-[var(--success)]' : 'border-[var(--error)] text-[var(--error)]'}">${n.label} (${n.score >= 0 ? '+' : ''}${n.score})</span>
-        </div>
-        <div class="font-semibold">${n.title}</div>
-        <div class="text-[var(--muted-foreground)]">${n.summary}</div>
-        <div class="flex gap-1.5 pt-0.5">${n.tickers.map((t) => `<button data-jump-ticker="${t}" class="px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--border)] mono text-xs text-[var(--primary)] cursor-pointer">${t}</button>`).join('')}</div>
-      </article>`).join('');
-    return `
-      <div class="h-full flex flex-col overflow-hidden text-xs">
-        <div class="px-3 py-1.5 bg-[var(--background)] border-b border-[var(--border)] flex flex-wrap items-center gap-2 mono">
-          <button data-news-scope="1" class="px-2 py-0.5 rounded border cursor-pointer ${f.scopeActive ? 'border-[var(--warning)] text-[var(--warning)]' : 'border-[var(--border)] text-[var(--muted-foreground)]'}">${f.scopeActive ? `ONLY ${pane.instId.split(':').pop()}` : 'ALL MARKETS'}</button>
-          <button data-news-lang="" class="px-2 py-0.5 rounded border cursor-pointer ${!f.lang ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)]'}">ALL</button>
-          <button data-news-lang="en" class="px-2 py-0.5 rounded border cursor-pointer ${f.lang === 'en' ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)]'}">EN</button>
-          <button data-news-lang="zh" class="px-2 py-0.5 rounded border cursor-pointer ${f.lang === 'zh' ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)]'}">ZH (A股)</button>
-        </div>
-        <div class="flex-1 overflow-y-auto">${listHtml || '<div class="p-4 text-[var(--muted-foreground)] mono">No matching filings/news.</div>'}</div>
-      </div>`;
-  }
-
-  function renderPort() {
-    const ccy = state.portBaseCcy;
-    const p = computePortfolio(ccy);
-    const holdingRows = p.holdings.map((h) => `
-      <tr>
-        <td class="mono font-semibold text-[var(--warning)]">${h.inst.symbol}</td>
-        <td class="mono">${h.inst.market} · ${h.ccy}</td>
-        <td class="text-right mono">${h.qty} ${h.t1Locked ? `<span class="px-1 rounded border border-[var(--error)] text-[var(--error)]">T+1:${h.t1Locked}</span>` : ''}</td>
-        <td class="text-right mono">${fmtCompact(h.mvBase, ccy)} (${h.weight.toFixed(1)}%)</td>
-        <td class="text-right mono font-semibold ${h.pnlBase >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${h.pnlBase >= 0 ? '+' : ''}${fmtCompact(h.pnlBase, ccy)} (${h.pnlPct.toFixed(1)}%)</td>
-        <td class="text-right mono ${h.fxPnl >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${h.fxPnl >= 0 ? '+' : ''}${fmtCompact(h.fxPnl, ccy)}</td>
-      </tr>`).join('');
-
-    const corrRows = p.holdings.map((h, i) => `
-      <tr>
-        <td class="mono font-semibold">${h.inst.symbol}</td>
-        ${p.corr[i].map((v, j) => `<td class="text-center mono ${i === j ? 'text-[var(--muted-foreground)]' : v >= 0.55 ? 'text-[var(--error)] font-semibold' : v <= 0.15 ? 'text-[var(--success)]' : ''}">${v.toFixed(2)}</td>`).join('')}
-      </tr>`).join('');
-
-    return `
-      <div class="h-full overflow-y-auto p-3 space-y-3 text-xs">
-        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--border)]">
-          <span class="font-semibold text-sm">Global Multi-Asset Alpha Portfolio</span>
-          <div class="flex gap-1 mono">
-            ${['USD', 'CNY'].map((c) => `<button data-port-ccy="${c}" class="px-2 py-0.5 rounded border cursor-pointer ${ccy === c ? 'border-[var(--warning)] text-[var(--warning)] font-bold' : 'border-[var(--border)] text-[var(--muted-foreground)]'}">BASE: ${c}</button>`).join('')}
-          </div>
-        </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mono">
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">NAV (${ccy})</div><div class="font-bold">${fmtCompact(p.totalMv, ccy)}</div></div>
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">UNREAL P&L</div><div class="font-bold ${p.unrealizedPnl >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${p.unrealizedPnl >= 0 ? '+' : ''}${fmtCompact(p.unrealizedPnl, ccy)}</div></div>
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">SHARPE</div><div class="font-bold text-[var(--primary)]">${p.sharpe.toFixed(2)}</div></div>
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">MAX DD</div><div class="font-bold text-[var(--error)]">${p.maxDdPct.toFixed(1)}%</div></div>
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">BETA</div><div class="font-bold text-[var(--warning)]">${p.beta.toFixed(2)}</div></div>
-          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">1D VaR 95%</div><div class="font-bold text-[var(--error)]">-${p.var95Pct.toFixed(2)}%</div></div>
-        </div>
-        <div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-left">Asset</th><th class="text-left">Mkt/CCY</th><th class="text-right">Qty</th><th class="text-right">Value (${ccy})</th><th class="text-right">Total P&L</th><th class="text-right">FX P&L</th></tr></thead><tbody>${holdingRows}</tbody></table></div>
-        <div class="overflow-x-auto rounded border border-[var(--card-border)] p-2 bg-[var(--background)]">
-          <div class="mono text-[var(--warning)] mb-1">CROSS-ASSET CORRELATION MATRIX (US · CN A-SHARES · CRYPTO)</div>
-          <table class="term-table"><thead><tr><th class="text-left">Asset</th>${p.holdings.map((h) => `<th class="text-center">${h.inst.symbol}</th>`).join('')}</tr></thead><tbody>${corrRows}</tbody></table>
-        </div>
-      </div>`;
-  }
-
-  function renderBql(pane) {
-    if (!state.bqlResult) state.bqlResult = runBqlTemplate(state.bqlQuery);
-    const res = state.bqlResult;
-    const templates = [
-      ['cross_asset', '[SQL] Cross-Asset 30D USD Return & Volatility'],
-      ['cn_micro', '[SQL] China A-Share 涨跌停 & Northbound Scanner'],
-      ['backtest', '[PYTHON] Dual-SMA(10/30) Momentum Backtest on BTC-USD'],
-    ];
-    const tableHtml = `<div class="overflow-x-auto flex-1"><table class="term-table mono"><thead><tr>${res.cols.map((c) => `<th class="text-left">${c}</th>`).join('')}</tr></thead><tbody>${res.rows.map((r) => `<tr>${res.cols.map((c) => `<td>${r[c]}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-    return `
-      <div class="h-full flex flex-col overflow-hidden text-xs">
-        <div class="px-3 py-1.5 bg-[var(--background)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2 mono">
-          <select id="bql-tpl-${pane.id}" data-bql-select="1" class="bg-[var(--card)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--primary)]">
-            ${templates.map(([k, lbl]) => `<option value="${k}" ${state.bqlQuery === k ? 'selected' : ''}>${lbl}</option>`).join('')}
-          </select>
-          <div class="flex items-center gap-2">
-            <span class="text-[var(--success)]">${res.rows.length} rows in ${res.ms} ms</span>
-            <button data-bql-run="1" class="px-2.5 py-1 rounded bg-[var(--warning)] text-black font-bold cursor-pointer">RUN BQL</button>
-          </div>
-        </div>
-        ${res.chart ? `<div class="h-40 border-b border-[var(--border)]"><canvas id="bql-canvas-${pane.id}" class="w-full h-full"></canvas></div>` : ''}
-        ${tableHtml}
-      </div>`;
-  }
-
-  // =========================================================================
-  // 6. MAIN RENDER LOOP, CANVAS BINDING & LIVE TICK ENGINE
-  // =========================================================================
-  function renderStatusBar() {
-    const tapeIds = ['EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:SSE:600519', 'EQ:SZSE:300750', 'CR:SPOT:BTC-USD', 'CR:SPOT:ETH-USD'];
-    const tapeHtml = tapeIds.map((id) => {
-      const inst = INSTRUMENTS[id];
-      const chgPct = ((inst.last.close - inst.prevClose) / inst.prevClose) * 100;
-      return `<button data-tape-id="${id}" class="mono px-1.5 py-0.5 rounded hover:bg-[var(--card)] cursor-pointer"><span class="font-semibold">${inst.symbol}</span> ${fmtPx(inst.last.close, inst.ccy)} <span class="${chgPct >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%</span></button>`;
-    }).join('');
-    document.getElementById('status-bar').innerHTML = `
-      <div class="flex flex-wrap items-center gap-3 mono">
-        <span class="font-bold text-[var(--warning)]">OPENTERM</span>
-        <span>USD/CNY <strong class="text-[var(--primary)]">${FX.USD_CNY.toFixed(4)}</strong></span>
-        <span class="text-[var(--success)]">● LIVE ENGINE</span>
-      </div>
-      <div class="flex flex-wrap items-center gap-1.5">${tapeHtml}</div>`;
   }
 
   function renderOpt(inst) {
     const target = inst.market === 'US' ? inst : INSTRUMENTS['EQ:US:AAPL'];
-    const spot = target.last.close;
-    const step = spot > 100 ? 5 : 2.5;
-    const atm = Math.round(spot / step) * step;
-    const strikes = [-3, -2, -1, 0, 1, 2, 3].map((k) => atm + k * step);
-    const rows = strikes.map((st) => {
-      const m = (spot - st) / spot;
+    if (!target.last) return loadingBox(target);
+    const spot = target.last.close, step = spot > 100 ? 5 : 2.5, atm = Math.round(spot / step) * step;
+    const rows = [-3, -2, -1, 0, 1, 2, 3].map((k) => {
+      const st = atm + k * step, m = (spot - st) / spot;
       const iv = (24 + Math.abs(m) * 45 + (target.symbol === 'NVDA' ? 14 : 0)).toFixed(1);
       const cDelta = Math.max(0.05, Math.min(0.95, 0.5 + m * 3.5)).toFixed(2);
       const pDelta = (-Math.max(0.05, Math.min(0.95, 0.5 - m * 3.5))).toFixed(2);
@@ -1200,71 +1131,123 @@
       const pMid = (Math.max(0, st - spot) + spot * (Number(iv) / 100) * 0.12 * Math.exp(-3 * m * m)).toFixed(2);
       return `<tr><td class="text-right mono text-[var(--warning)]">${iv}%</td><td class="text-right mono text-[var(--primary)]">${cDelta}</td><td class="text-right mono text-[var(--success)]">$${cMid}</td><td class="text-center mono font-bold text-[var(--warning)] bg-[var(--sidebar)]">$${st.toFixed(1)}</td><td class="text-left mono text-[var(--error)]">$${pMid}</td><td class="text-right mono text-[var(--primary)]">${pDelta}</td><td class="text-right mono text-[var(--warning)]">${iv}%</td></tr>`;
     }).join('');
-    const hRows = (target.holders13f || []).map((h) => `<tr><td>${h.name}</td><td class="text-right mono text-[var(--primary)]">${h.pct}%</td><td class="text-right mono">${h.qoq}</td></tr>`).join('');
-    return `
-      <div class="h-full overflow-y-auto p-3 space-y-3 text-xs">
-        <div class="flex flex-wrap justify-between gap-2 pb-2 border-b border-[var(--border)] mono">
-          <span class="font-bold text-[var(--primary)]">${target.symbol} US OPTIONS STRADDLE CHAIN & SEC 13F</span>
-          <span>Spot: <strong>${fmtPx(spot, 'USD')}</strong> · CIK ${target.cik}</span>
-        </div>
-        <div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-right">Call IV</th><th class="text-right">Delta</th><th class="text-right">Call Last</th><th class="text-center">STRIKE</th><th class="text-left">Put Last</th><th class="text-right">Delta</th><th class="text-right">Put IV</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-left">SEC 13F Top Holder</th><th class="text-right">% Out</th><th class="text-right">QoQ Change</th></tr></thead><tbody>${hRows}</tbody></table></div>
-      </div>`;
+    return `<div class="h-full overflow-y-auto p-3 space-y-3 text-xs"><div class="flex flex-wrap justify-between gap-2 pb-2 border-b border-[var(--border)] mono"><span class="font-bold text-[var(--primary)]">${target.symbol} OPTIONS CHAIN (LIVE SPOT ANCHORED) & 13F</span><span>Live Spot: <strong>${fmtPx(spot, 'USD')}</strong> · CIK ${target.cik || '—'}</span></div><div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-right">Call IV</th><th class="text-right">Delta</th><th class="text-right">Call Theo</th><th class="text-center">STRIKE</th><th class="text-left">Put Theo</th><th class="text-right">Delta</th><th class="text-right">Put IV</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   function renderFlow() {
-    const cns = Object.values(INSTRUMENTS).filter((i) => i.market === 'CN_ASHARE');
-    const totalNb = cns.reduce((s, i) => s + (i.northboundEligible ? i.nbFlows[i.nbFlows.length - 1].flow : 0), 0);
+    const cns = Object.values(INSTRUMENTS).filter((i) => i.market === 'CN_ASHARE' && i.last);
+    if (!cns.length) return `<div class="p-4 mono text-xs text-[var(--muted-foreground)] animate-pulse">Fetching live China A-Share board quotes from EastMoney...</div>`;
     const rows = cns.map((i) => {
-      const up = roundCny(i.prevClose * (1 + i.limitPct));
-      const dn = roundCny(i.prevClose * (1 - i.limitPct));
+      const up = roundCny(i.prevClose * (1 + i.limitPct)), dn = roundCny(i.prevClose * (1 - i.limitPct));
       const chg = ((i.last.close - i.prevClose) / i.prevClose) * 100;
-      const nb = i.nbFlows[i.nbFlows.length - 1].flow;
-      return `<tr data-jump-row="${i.id}"><td class="mono font-bold text-[var(--warning)]">${i.symbol} ${i.localName}</td><td class="mono">${i.board}</td><td class="text-right mono">¥${i.last.close.toFixed(2)}</td><td class="text-right mono ${chg >= 0 ? 'text-[var(--error)]' : 'text-[var(--success)]'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</td><td class="text-right mono text-[var(--error)]">¥${up.toFixed(2)}</td><td class="text-right mono text-[var(--success)]">¥${dn.toFixed(2)}</td><td class="text-right mono text-[var(--primary)]">${i.northboundEligible ? i.nbHoldPct + '%' : 'BSE'}</td><td class="text-right mono">${i.northboundEligible ? fmtCompact(nb, 'CNY') : '—'}</td></tr>`;
+      return `<tr><td class="mono font-bold text-[var(--warning)]">${i.symbol} ${i.localName}</td><td class="mono">${i.board}</td><td class="text-right mono font-semibold">¥${i.last.close.toFixed(2)}</td><td class="text-right mono font-semibold ${chg >= 0 ? 'text-[var(--error)]' : 'text-[var(--success)]'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</td><td class="text-right mono text-[var(--error)]">¥${up.toFixed(2)}</td><td class="text-right mono text-[var(--success)]">¥${dn.toFixed(2)}</td><td class="text-right mono text-[var(--primary)]">${fmtCompact(i.last.turnover, 'CNY')}</td><td class="text-right mono text-[var(--muted-foreground)]">${i.last.date}</td></tr>`;
     }).join('');
-    return `
-      <div class="h-full overflow-y-auto p-3 space-y-3 text-xs">
-        <div class="flex flex-wrap justify-between gap-2 pb-2 border-b border-[var(--border)] mono">
-          <span class="font-bold text-[var(--error)]">CHINA A-SHARE STOCK CONNECT (北向/南向资金) & 涨跌停 MONITOR</span>
-          <span>北向 Today: <strong class="text-[var(--error)]">${fmtCompact(totalNb, 'CNY')}</strong> · T+1 STRICT</span>
-        </div>
-        <div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-left">Ticker</th><th class="text-left">Board</th><th class="text-right">Last</th><th class="text-right">Chg%</th><th class="text-right">涨停 Up</th><th class="text-right">跌停 Down</th><th class="text-right">北向 Hold</th><th class="text-right">北向 Flow</th></tr></thead><tbody>${rows}</tbody></table></div>
-      </div>`;
+    return `<div class="h-full overflow-y-auto p-3 space-y-3 text-xs"><div class="flex flex-wrap justify-between gap-2 pb-2 border-b border-[var(--border)] mono"><span class="font-bold text-[var(--error)]">LIVE CHINA A-SHARE 涨跌停 BOARD MONITOR (沪深/北交所)</span><span>T+1 STRICT · EastMoney Live</span></div><div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-left">Ticker</th><th class="text-left">Board</th><th class="text-right">Live Last</th><th class="text-right">Chg %</th><th class="text-right">涨停 Up</th><th class="text-right">跌停 Down</th><th class="text-right">Turnover</th><th class="text-right">Session</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   function renderPerp() {
-    const crs = Object.values(INSTRUMENTS).filter((i) => i.market === 'CRYPTO');
+    const crs = Object.values(INSTRUMENTS).filter((i) => i.market === 'CRYPTO' && i.last);
+    if (!crs.length) return `<div class="p-4 mono text-xs text-[var(--muted-foreground)] animate-pulse">Fetching live OKX perpetual funding, Open Interest & DefiLlama TVL...</div>`;
     const rows = crs.map((i) => {
       const c = i.crypto;
-      const dexPct = ((c.dexVol / (c.cexVol + c.dexVol)) * 100).toFixed(1);
-      return `<tr><td class="mono font-bold text-[var(--warning)]">${i.symbol}</td><td class="text-right mono">${fmtPx(i.last.close, 'USD')}</td><td class="text-right mono text-[var(--success)]">+${(c.funding8h * 10000).toFixed(2)} bp</td><td class="text-right mono text-[var(--primary)]">${(c.funding8h * 3 * 365 * 100).toFixed(1)}%</td><td class="text-right mono">${fmtCompact(c.oiUsd, 'USD')}</td><td class="text-right mono">+${c.basisBps} bp</td><td class="text-right mono">${fmtCompact(c.cexVol, 'USD')}</td><td class="text-right mono text-[var(--warning)]">${dexPct}%</td><td class="text-right mono text-[var(--success)]">${c.tvlUsd ? fmtCompact(c.tvlUsd, 'USD') : 'PoW L1'}</td></tr>`;
+      return `<tr><td class="mono font-bold text-[var(--warning)]">${i.symbol}</td><td class="text-right mono font-semibold">${fmtPx(i.last.close, 'USD')}</td><td class="text-right mono ${(c.funding8h ?? 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${c.funding8h !== null ? (c.funding8h * 10000).toFixed(3) + ' bp' : '—'}</td><td class="text-right mono text-[var(--primary)]">${c.funding8h !== null ? (c.funding8h * 3 * 365 * 100).toFixed(2) + '%' : '—'}</td><td class="text-right mono">${fmtCompact(c.oiUsd, 'USD')}</td><td class="text-right mono">${fmtCompact(c.vol24hUsd || i.last.turnover, 'USD')}</td><td class="text-right mono text-[var(--success)]">${c.tvlUsd ? fmtCompact(c.tvlUsd, 'USD') : '—'}</td></tr>`;
     }).join('');
+    return `<div class="h-full overflow-y-auto p-3 space-y-3 text-xs"><div class="flex flex-wrap justify-between gap-2 pb-2 border-b border-[var(--border)] mono"><span class="font-bold text-[var(--warning)]">LIVE CRYPTO PERPETUAL FUNDING, OPEN INTEREST & DEFILLAMA TVL</span><span class="text-[var(--success)]">Global DEX 24h: ${fmtCompact(DEFI_GLOBAL.dex24hUsd, 'USD')}</span></div><div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-left">Asset</th><th class="text-right">Live Spot</th><th class="text-right">OKX 8h Fund</th><th class="text-right">Ann Fund</th><th class="text-right">OKX Open Int</th><th class="text-right">24h Vol</th><th class="text-right">DefiLlama TVL</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }
+
+  function renderNews() {
+    const items = Object.values(INSTRUMENTS).filter((i) => i.last).map((i) => {
+      const chg = ((i.last.close - i.prevClose) / i.prevClose) * 100;
+      const lbl = chg > 1.2 ? 'BULLISH' : chg < -1.2 ? 'BEARISH' : 'NEUTRAL';
+      return `<article class="p-2.5 border-b border-[var(--card-border)] space-y-1"><div class="flex justify-between mono text-xs"><span class="text-[var(--warning)]">${i.liveSource} · ${i.liveUpdatedAt}</span><span class="px-1.5 rounded border ${lbl === 'BULLISH' ? 'border-[var(--success)] text-[var(--success)]' : lbl === 'BEARISH' ? 'border-[var(--error)] text-[var(--error)]' : 'border-[var(--border)]'}">${lbl} (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%)</span></div><div class="font-semibold">${i.symbol} ${i.name} ${i.localName || ''} trading at ${fmtPx(i.last.close, i.ccy)} (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%)</div><div class="text-[var(--muted-foreground)]">Session H/L: ${fmtPx(i.last.high, i.ccy)} / ${fmtPx(i.last.low, i.ccy)} · Volume: ${fmtCompact(i.last.volume)}</div></article>`;
+    }).join('');
+    return `<div class="h-full overflow-y-auto text-xs">${items || '<div class="p-4 mono text-[var(--muted-foreground)]">Loading live market tape...</div>'}</div>`;
+  }
+
+  function renderPort() {
+    const ccy = state.portBaseCcy;
+    const p = computePortfolio(ccy);
+    if (!p) return `<div class="p-4 mono text-xs text-[var(--muted-foreground)] animate-pulse">Waiting for live US, China A-Share, Crypto & FX feeds to value portfolio...</div>`;
+    const rows = p.holdings.map((h) => `
+      <tr>
+        <td class="mono font-semibold text-[var(--warning)]">${h.inst.symbol}</td>
+        <td class="mono">${h.inst.market} · ${h.ccy}</td>
+        <td class="text-right mono">${h.qty} ${h.t1Locked ? `<span class="px-1 rounded border border-[var(--error)] text-[var(--error)]">T+1:${h.t1Locked}</span>` : ''}</td>
+        <td class="text-right mono">${fmtPx(h.inst.last.close, h.ccy)}</td>
+        <td class="text-right mono">${fmtCompact(h.mvBase, ccy)} (${h.weight.toFixed(1)}%)</td>
+        <td class="text-right mono font-semibold ${h.pnlBase >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${h.pnlBase >= 0 ? '+' : ''}${fmtCompact(h.pnlBase, ccy)} (${h.pnlPct.toFixed(1)}%)</td>
+      </tr>`).join('');
+    const corrRows = p.holdings.map((h, i) => `<tr><td class="mono font-semibold">${h.inst.symbol}</td>${p.corr[i].map((v, j) => `<td class="text-center mono ${i === j ? 'text-[var(--muted-foreground)]' : v >= 0.55 ? 'text-[var(--error)] font-semibold' : v <= 0.15 ? 'text-[var(--success)]' : ''}">${v.toFixed(2)}</td>`).join('')}</tr>`).join('');
     return `
       <div class="h-full overflow-y-auto p-3 space-y-3 text-xs">
-        <div class="flex flex-wrap justify-between gap-2 pb-2 border-b border-[var(--border)] mono">
-          <span class="font-bold text-[var(--warning)]">CRYPTO PERPETUAL FUNDING, OPEN INTEREST & CEX/DEX TVL</span>
-          <span class="text-[var(--success)]">24/7 CONTINUOUS · T+0</span>
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--border)]">
+          <span class="font-semibold text-sm">Live Multi-Asset Portfolio (Marked to Real Market Prices)</span>
+          <div class="flex gap-1 mono">${['USD', 'CNY', 'USDT'].map((c) => `<button data-port-ccy="${c}" class="px-2 py-0.5 rounded border cursor-pointer ${ccy === c ? 'border-[var(--warning)] text-[var(--warning)] font-bold' : 'border-[var(--border)] text-[var(--muted-foreground)]'}">${c}</button>`).join('')}</div>
         </div>
-        <div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-left">Asset</th><th class="text-right">Spot</th><th class="text-right">8h Fund</th><th class="text-right">Ann Fund</th><th class="text-right">Open Int</th><th class="text-right">Basis</th><th class="text-right">CEX 24h</th><th class="text-right">DEX Share</th><th class="text-right">TVL</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mono">
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">NAV (${ccy})</div><div class="font-bold">${fmtCompact(p.totalMv, ccy)}</div></div>
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">60D P&L</div><div class="font-bold ${p.unrealizedPnl >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${p.unrealizedPnl >= 0 ? '+' : ''}${fmtCompact(p.unrealizedPnl, ccy)}</div></div>
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">SHARPE</div><div class="font-bold text-[var(--primary)]">${p.sharpe.toFixed(2)}</div></div>
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">MAX DD</div><div class="font-bold text-[var(--error)]">${p.maxDdPct.toFixed(1)}%</div></div>
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">BETA</div><div class="font-bold text-[var(--warning)]">${p.beta.toFixed(2)}</div></div>
+          <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)]"><div class="text-[var(--muted-foreground)]">1D VaR 95%</div><div class="font-bold text-[var(--error)]">-${p.var95Pct.toFixed(2)}%</div></div>
+        </div>
+        <div class="overflow-x-auto rounded border border-[var(--card-border)]"><table class="term-table"><thead><tr><th class="text-left">Asset</th><th class="text-left">Mkt/CCY</th><th class="text-right">Qty</th><th class="text-right">Live Px</th><th class="text-right">Value (${ccy})</th><th class="text-right">60D P&L</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="overflow-x-auto rounded border border-[var(--card-border)] p-2 bg-[var(--background)]"><div class="mono text-[var(--warning)] mb-1">REALIZED CORRELATION MATRIX (COMPUTED FROM LIVE HISTORICAL RETURNS)</div><table class="term-table"><thead><tr><th class="text-left">Asset</th>${p.holdings.map((h) => `<th class="text-center">${h.inst.symbol}</th>`).join('')}</tr></thead><tbody>${corrRows}</tbody></table></div>
       </div>`;
+  }
+
+  function renderBql(pane) {
+    state.bqlResult = runBqlTemplate(state.bqlQuery);
+    const res = state.bqlResult;
+    const templates = [
+      ['cross_asset', '[SQL] Live Cross-Asset 30D USD Return & Volatility'],
+      ['cn_micro', '[SQL] Live China A-Share 涨跌停 Board Scanner'],
+      ['backtest', '[PYTHON] Live BTC-USD SMA(10)/SMA(30) Backtest'],
+    ];
+    return `
+      <div class="h-full flex flex-col overflow-hidden text-xs">
+        <div class="px-3 py-1.5 bg-[var(--background)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2 mono">
+          <select data-bql-select="1" class="bg-[var(--card)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--primary)]">${templates.map(([k, lbl]) => `<option value="${k}" ${state.bqlQuery === k ? 'selected' : ''}>${lbl}</option>`).join('')}</select>
+          <div class="flex items-center gap-2"><span class="text-[var(--success)]">${res.rows.length} rows (${res.ms} ms)</span><button data-bql-run="1" class="px-2.5 py-1 rounded bg-[var(--warning)] text-black font-bold cursor-pointer">RUN BQL</button></div>
+        </div>
+        ${res.chart ? `<div class="h-40 border-b border-[var(--border)]"><canvas id="bql-canvas-${pane.id}" class="w-full h-full"></canvas></div>` : ''}
+        <div class="overflow-x-auto flex-1"><table class="term-table mono"><thead><tr>${res.cols.map((c) => `<th class="text-left">${c}</th>`).join('')}</tr></thead><tbody>${res.rows.map((r) => `<tr>${res.cols.map((c) => `<td>${r[c]}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      </div>`;
+  }
+
+  // =========================================================================
+  // 7. WORKSPACE RENDER & EVENT BINDING
+  // =========================================================================
+  function renderStatusBar() {
+    const tapeIds = ['CR:SPOT:BTC-USD', 'CR:SPOT:ETH-USD', 'CR:SPOT:SOL-USD', 'EQ:US:AAPL', 'EQ:US:NVDA', 'EQ:SSE:600519', 'EQ:SZSE:300750'];
+    const tapeHtml = tapeIds.map((id) => {
+      const inst = INSTRUMENTS[id];
+      if (!inst?.last) return `<span class="mono px-1.5 text-[var(--muted-foreground)]">${inst.symbol} …</span>`;
+      const chgPct = ((inst.last.close - inst.prevClose) / inst.prevClose) * 100;
+      return `<button data-tape-id="${id}" class="mono px-1.5 py-0.5 rounded hover:bg-[var(--card)] cursor-pointer"><span class="font-semibold">${inst.symbol}</span> ${fmtPx(inst.last.close, inst.ccy)} <span class="${chgPct >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]'}">${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%</span></button>`;
+    }).join('');
+    document.getElementById('status-bar').innerHTML = `
+      <div class="flex flex-wrap items-center gap-3 mono">
+        <span class="font-bold text-[var(--warning)]">OPENTERM</span>
+        <span>USD/CNY <strong class="text-[var(--primary)]">${FX.USD_CNY ? FX.USD_CNY.toFixed(4) : '…'}</strong></span>
+        <span class="text-[var(--success)]">● ${wsStatus}</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5">${tapeHtml}</div>`;
   }
 
   function renderWorkspace() {
     renderStatusBar();
     const activePane = state.panes.find((p) => p.id === state.activePaneId) || state.panes[0];
     document.getElementById('active-pane-badge').textContent = `P${activePane.idx}`;
-
-    // Layout buttons
-    document.getElementById('layout-controls').innerHTML = ['1x1', '1x2', '2x2'].map((l) => `
-      <button data-layout="${l}" class="px-2 py-1 rounded cursor-pointer ${state.layout === l ? 'bg-[var(--warning)] text-black font-bold' : 'text-[var(--muted-foreground)]'}">${l}</button>
-    `).join('');
+    document.getElementById('layout-controls').innerHTML = ['1x1', '1x2', '2x2'].map((l) => `<button data-layout="${l}" class="px-2 py-1 rounded cursor-pointer ${state.layout === l ? 'bg-[var(--warning)] text-black font-bold' : 'text-[var(--muted-foreground)]'}">${l}</button>`).join('');
 
     const grid = document.getElementById('workspace-grid');
     grid.className = `flex-1 grid gap-2 p-2 ${state.layout === '1x1' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`;
     const visiblePanes = state.layout === '1x1' ? [activePane] : state.layout === '1x2' ? state.panes.slice(0, 2) : state.panes;
 
     grid.innerHTML = visiblePanes.map((pane) => {
-      const inst = INSTRUMENTS[pane.instId] || INSTRUMENTS['EQ:US:AAPL'];
+      const inst = INSTRUMENTS[pane.instId] || INSTRUMENTS['CR:SPOT:BTC-USD'];
       const isActive = pane.id === state.activePaneId;
       const linkColor = pane.linkGroup === 'A' ? 'var(--primary)' : pane.linkGroup === 'B' ? 'var(--warning)' : pane.linkGroup === 'C' ? 'var(--success)' : 'var(--muted-foreground)';
       const fnTabs = FUNCTIONS.map((f) => `<button data-pane-fn="${pane.id}:${f}" class="px-1.5 py-0.5 rounded mono text-xs cursor-pointer ${pane.fn === f ? 'bg-[var(--warning)] text-black font-bold' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}">${f}</button>`).join('');
@@ -1277,7 +1260,7 @@
       else if (pane.fn === 'OPT') content = renderOpt(inst);
       else if (pane.fn === 'FLOW') content = renderFlow();
       else if (pane.fn === 'PERP') content = renderPerp();
-      else if (pane.fn === 'NEWS') content = renderNews(pane);
+      else if (pane.fn === 'NEWS') content = renderNews();
       else if (pane.fn === 'PORT') content = renderPort();
       else if (pane.fn === 'BQL') content = renderBql(pane);
 
@@ -1286,7 +1269,7 @@
           <div class="px-2 py-1.5 bg-[var(--sidebar)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-1.5">
             <div class="flex items-center gap-1.5 mono text-xs">
               <span class="px-1.5 py-0.5 rounded font-bold ${isActive ? 'bg-[var(--warning)] text-black' : 'bg-[var(--background)] text-[var(--muted-foreground)]'}">P${pane.idx}</span>
-              <button data-cycle-link="${pane.id}" style="border-color:${linkColor};color:${linkColor}" class="px-1.5 py-0.5 rounded border font-semibold cursor-pointer" title="Cycle Link Group (Alt+L)">GRP ${pane.linkGroup}</button>
+              <button data-cycle-link="${pane.id}" style="border-color:${linkColor};color:${linkColor}" class="px-1.5 py-0.5 rounded border font-semibold cursor-pointer">GRP ${pane.linkGroup}</button>
               <span class="font-bold text-[var(--warning)]">${inst.symbol}</span>
             </div>
             <div class="flex flex-wrap items-center gap-0.5">${fnTabs}</div>
@@ -1295,20 +1278,17 @@
         </section>`;
     }).join('');
 
-    // Draw canvases after layout settles
     requestAnimationFrame(() => drawAllCanvases(visiblePanes));
   }
 
   function drawAllCanvases(visiblePanes) {
     const panes = visiblePanes || state.panes;
-    const th = getThemeColors();
+    const th = getTheme();
     panes.forEach((pane) => {
-      if (pane.fn === 'GP') {
-        drawCandleChart(document.getElementById(`gp-canvas-${pane.id}`), INSTRUMENTS[pane.instId]);
-      } else if (pane.fn === 'COMP') {
-        const series = pane.compIds.map((id, idx) => {
-          const cs = INSTRUMENTS[id].candles.slice(-90);
-          const base = cs[0].close;
+      if (pane.fn === 'GP') drawCandleChart(document.getElementById(`gp-canvas-${pane.id}`), INSTRUMENTS[pane.instId]);
+      else if (pane.fn === 'COMP') {
+        const series = pane.compIds.filter((id) => INSTRUMENTS[id]?.candles?.length >= 30).map((id, idx) => {
+          const cs = INSTRUMENTS[id].candles.slice(-60), base = cs[0].close;
           return { values: cs.map((c) => (c.close / base) * 100), color: th.charts[idx % th.charts.length] };
         });
         drawLineSeriesChart(document.getElementById(`comp-canvas-${pane.id}`), series);
@@ -1322,31 +1302,27 @@
     });
   }
 
-  // Quick command chips
-  const PRESETS = [
+  document.getElementById('quick-cmds').innerHTML = [
+    ['BTC DES', 'BTC-USD <Crypto> DES'],
     ['600519 DES', '600519 CH <Equity> DES'],
-    ['300750 DES', '300750 CH <Equity> DES'],
     ['AAPL FA', 'AAPL US <Equity> FA'],
-    ['BTC GP', 'BTC-USD <Crypto> GP'],
-    ['COMP', 'AAPL US, NVDA US, 600519 CH, BTC-USD COMP'],
-    ['NEWS', 'NEWS'],
+    ['FLOW', 'FLOW'],
+    ['PERP', 'PERP'],
+    ['OPT', 'AAPL US OPT'],
     ['PORT', 'PORT'],
     ['BQL', 'BQL'],
-  ];
-  document.getElementById('quick-cmds').innerHTML = PRESETS.map(([lbl, cmd]) => `
-    <button data-run-cmd="${cmd}" class="px-2 py-1 rounded bg-[var(--background)] hover:border-[var(--warning)] border border-[var(--border)] mono text-xs cursor-pointer">${lbl}</button>
-  `).join('');
+  ].map(([lbl, cmd]) => `<button data-run-cmd="${cmd}" class="px-2 py-1 rounded bg-[var(--background)] hover:border-[var(--warning)] border border-[var(--border)] mono text-xs cursor-pointer">${lbl}</button>`).join('');
 
-  // Delegated click & input handlers
+  document.getElementById('btn-refresh-all').addEventListener('click', () => void refreshAllLiveMarketData());
+
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     const paneBox = e.target.closest('[data-pane-box]');
     if (paneBox && paneBox.dataset.paneBox !== state.activePaneId && !btn?.dataset.cycleLink) {
-      state.activePaneId = paneBox.dataset.paneBox;
-      renderWorkspace();
+      state.activePaneId = paneBox.dataset.paneBox; renderWorkspace();
     }
     if (!btn) return;
-    if (btn.dataset.runCmd) { executeCommand(btn.dataset.runCmd); return; }
+    if (btn.dataset.runCmd) { void executeCommand(btn.dataset.runCmd); return; }
     if (btn.dataset.layout) { state.layout = btn.dataset.layout; renderWorkspace(); return; }
     if (btn.dataset.tapeId) {
       const p = state.panes.find((x) => x.id === state.activePaneId) || state.panes[0];
@@ -1354,43 +1330,18 @@
       if (p.linkGroup !== 'NONE') state.panes.forEach((x) => { if (x.linkGroup === p.linkGroup) x.instId = btn.dataset.tapeId; });
       renderWorkspace(); return;
     }
-    if (btn.dataset.paneFn) {
-      const [pid, fn] = btn.dataset.paneFn.split(':');
-      state.activePaneId = pid;
-      const p = state.panes.find((x) => x.id === pid);
-      if (p) p.fn = fn;
-      renderWorkspace(); return;
-    }
-    if (btn.dataset.cycleLink) {
-      const p = state.panes.find((x) => x.id === btn.dataset.cycleLink);
-      if (p) p.linkGroup = LINK_CYCLE[(LINK_CYCLE.indexOf(p.linkGroup) + 1) % LINK_CYCLE.length];
-      renderWorkspace(); return;
-    }
+    if (btn.dataset.paneFn) { const [pid, fn] = btn.dataset.paneFn.split(':'); state.activePaneId = pid; const p = state.panes.find((x) => x.id === pid); if (p) p.fn = fn; renderWorkspace(); return; }
+    if (btn.dataset.cycleLink) { const p = state.panes.find((x) => x.id === btn.dataset.cycleLink); if (p) p.linkGroup = LINK_CYCLE[(LINK_CYCLE.indexOf(p.linkGroup) + 1) % LINK_CYCLE.length]; renderWorkspace(); return; }
     if (btn.dataset.faTab) { state.faTab = btn.dataset.faTab; renderWorkspace(); return; }
     if (btn.dataset.gpOv) { state.gpOverlays[btn.dataset.gpOv] = !state.gpOverlays[btn.dataset.gpOv]; renderWorkspace(); return; }
     if (btn.dataset.compCcy) { state.compBaseCcy = btn.dataset.compCcy; renderWorkspace(); return; }
     if (btn.dataset.portCcy) { state.portBaseCcy = btn.dataset.portCcy; renderWorkspace(); return; }
-    if (btn.dataset.newsScope) { state.newsFilter.scopeActive = !state.newsFilter.scopeActive; renderWorkspace(); return; }
-    if ('newsLang' in btn.dataset) { state.newsFilter.lang = btn.dataset.newsLang; renderWorkspace(); return; }
-    if (btn.dataset.jumpTicker) { executeCommand(`${btn.dataset.jumpTicker} DES`); return; }
     if (btn.dataset.bqlRun) { state.bqlResult = runBqlTemplate(state.bqlQuery); renderWorkspace(); return; }
   });
 
-  document.addEventListener('input', (e) => {
-    if (e.target.dataset.dcf) {
-      state.dcfParams[e.target.dataset.dcf] = parseFloat(e.target.value);
-      renderWorkspace();
-    }
-  });
-  document.addEventListener('change', (e) => {
-    if (e.target.dataset.bqlSelect) {
-      state.bqlQuery = e.target.value;
-      state.bqlResult = runBqlTemplate(state.bqlQuery);
-      renderWorkspace();
-    }
-  });
+  document.addEventListener('input', (e) => { if (e.target.dataset.dcf) { state.dcfParams[e.target.dataset.dcf] = parseFloat(e.target.value); renderWorkspace(); } });
+  document.addEventListener('change', (e) => { if (e.target.dataset.bqlSelect) { state.bqlQuery = e.target.value; renderWorkspace(); } });
 
-  // Command bar autocomplete & keyboard shortcuts
   const cmdInput = document.getElementById('cmd-input');
   const dropdown = document.getElementById('cmd-dropdown');
   function updateDropdown() {
@@ -1400,87 +1351,41 @@
         cmd: i.market === 'US' ? `${i.symbol} US <Equity> DES` : i.market === 'CN_ASHARE' ? `${i.symbol} CH <Equity> DES` : `${i.symbol} <Crypto> GP`,
         detail: `${i.name} ${i.localName} (${i.market})`,
       })),
-      { cmd: 'AAPL US, NVDA US, 600519 CH, BTC-USD COMP', detail: 'Cross-Market FX-Normalized Peer Comparison' },
-      { cmd: 'PORT', detail: 'Multi-Currency Portfolio & VaR Risk Matrix' },
-      { cmd: 'BQL', detail: 'Programmable SQL & Python Backtest Console' },
-      { cmd: 'NEWS', detail: 'Bilingual EN/ZH News & Filings Feed' },
+      { cmd: 'TSLA US <Equity> GP', detail: 'Dynamic Live Fetch — Any US Ticker' },
+      { cmd: '000001 CH <Equity> DES', detail: 'Dynamic Live Fetch — Any 6-Digit China A-Share' },
+      { cmd: 'DOGE-USD <Crypto> GP', detail: 'Dynamic Live Fetch — Any Crypto Pair' },
+      { cmd: 'AAPL US, NVDA US, 600519 CH, BTC-USD COMP', detail: 'Live FX-Normalized Peer Comparison' },
+      { cmd: 'FLOW', detail: 'Live China A-Share 涨跌停 Board Monitor' },
+      { cmd: 'PERP', detail: 'Live OKX Funding, OI & DefiLlama TVL' },
     ].filter((x) => !q || x.cmd.toUpperCase().includes(q) || x.detail.toUpperCase().includes(q)).slice(0, 8);
     if (!items.length) { dropdown.classList.add('hidden'); return; }
-    dropdown.innerHTML = items.map((x) => `
-      <button type="button" data-ac-cmd="${x.cmd}" class="w-full text-left px-3 py-1.5 hover:bg-[var(--sidebar)] flex items-center justify-between gap-2 text-xs cursor-pointer border-b border-[var(--card-border)]">
-        <span class="mono font-semibold text-[var(--warning)]">${x.cmd}</span>
-        <span class="text-[var(--muted-foreground)] truncate">${x.detail}</span>
-      </button>`).join('');
+    dropdown.innerHTML = items.map((x) => `<button type="button" data-ac-cmd="${x.cmd}" class="w-full text-left px-3 py-1.5 hover:bg-[var(--sidebar)] flex items-center justify-between gap-2 text-xs cursor-pointer border-b border-[var(--card-border)]"><span class="mono font-semibold text-[var(--warning)]">${x.cmd}</span><span class="text-[var(--muted-foreground)] truncate">${x.detail}</span></button>`).join('');
     dropdown.classList.remove('hidden');
   }
-  dropdown.addEventListener('mousedown', (e) => {
-    const b = e.target.closest('button');
-    if (b?.dataset.acCmd) {
-      e.preventDefault();
-      cmdInput.value = '';
-      dropdown.classList.add('hidden');
-      executeCommand(b.dataset.acCmd);
-    }
-  });
+  dropdown.addEventListener('mousedown', (e) => { const b = e.target.closest('button'); if (b?.dataset.acCmd) { e.preventDefault(); cmdInput.value = ''; dropdown.classList.add('hidden'); void executeCommand(b.dataset.acCmd); } });
   cmdInput.addEventListener('focus', updateDropdown);
   cmdInput.addEventListener('input', updateDropdown);
   cmdInput.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));
   cmdInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const val = cmdInput.value;
-      cmdInput.value = '';
-      dropdown.classList.add('hidden');
-      executeCommand(val);
-    } else if (e.key === 'Escape') {
-      cmdInput.value = ''; dropdown.classList.add('hidden'); cmdInput.blur();
-    } else if (e.key === 'F2') {
-      e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Equity> `;
-    } else if (e.key === 'F3') {
-      e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Crypto> `;
-    }
+    if (e.key === 'Enter') { e.preventDefault(); const v = cmdInput.value; cmdInput.value = ''; dropdown.classList.add('hidden'); void executeCommand(v); }
+    else if (e.key === 'Escape') { cmdInput.value = ''; dropdown.classList.add('hidden'); cmdInput.blur(); }
+    else if (e.key === 'F2') { e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Equity> `; }
+    else if (e.key === 'F3') { e.preventDefault(); cmdInput.value = `${cmdInput.value.trim()} <Crypto> `; }
   });
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement !== cmdInput && e.target.tagName !== 'INPUT') {
-      e.preventDefault(); cmdInput.focus(); updateDropdown();
-    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault(); cmdInput.focus(); cmdInput.select(); updateDropdown();
-    } else if (e.altKey && ['1', '2', '3', '4'].includes(e.key)) {
-      e.preventDefault(); state.activePaneId = `pane-${e.key}`; renderWorkspace();
-    } else if (e.altKey && e.key.toLowerCase() === 'l') {
-      e.preventDefault();
-      const p = state.panes.find((x) => x.id === state.activePaneId);
-      if (p) { p.linkGroup = LINK_CYCLE[(LINK_CYCLE.indexOf(p.linkGroup) + 1) % LINK_CYCLE.length]; renderWorkspace(); }
-    }
+    if (e.key === '/' && document.activeElement !== cmdInput && e.target.tagName !== 'INPUT') { e.preventDefault(); cmdInput.focus(); updateDropdown(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); cmdInput.focus(); cmdInput.select(); updateDropdown(); }
+    else if (e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); state.activePaneId = `pane-${e.key}`; renderWorkspace(); }
+    else if (e.altKey && e.key.toLowerCase() === 'l') { e.preventDefault(); const p = state.panes.find((x) => x.id === state.activePaneId); if (p) { p.linkGroup = LINK_CYCLE[(LINK_CYCLE.indexOf(p.linkGroup) + 1) % LINK_CYCLE.length]; renderWorkspace(); } }
   });
-
   window.addEventListener('resize', () => drawAllCanvases());
-  window.addEventListener('themechange', () => drawAllCanvases());
 
-  // Live micro-tick simulation (respects China A-Share price-limit clamping)
-  setInterval(() => {
-    Object.values(INSTRUMENTS).forEach((inst) => {
-      const sigma = inst.market === 'CRYPTO' ? 0.0012 : 0.0005;
-      let nxt = inst.last.close * (1 + gauss() * sigma);
-      if (inst.market === 'CN_ASHARE' && inst.limitPct) {
-        const up = roundCny(inst.prevClose * (1 + inst.limitPct));
-        const dn = roundCny(inst.prevClose * (1 - inst.limitPct));
-        nxt = Math.min(up, Math.max(dn, roundCny(nxt)));
-      } else {
-        nxt = Number(nxt.toFixed(2));
-      }
-      inst.last.close = nxt;
-      inst.last.high = Math.max(inst.last.high, nxt);
-      inst.last.low = Math.min(inst.last.low, nxt);
-    });
-    renderStatusBar();
-    state.panes.forEach((p) => {
-      if (p.fn === 'GP') drawCandleChart(document.getElementById(`gp-canvas-${p.id}`), INSTRUMENTS[p.instId]);
-    });
-  }, 2200);
-
+  // Boot: Render immediately, fetch 100% REAL LIVE market data & connect Coinbase live WebSocket!
   renderWorkspace();
+  void refreshAllLiveMarketData();
+  startLiveCryptoWebSocket();
+  setInterval(() => void refreshAllLiveMarketData(), 60000);
 })();
 </script>
 </body>

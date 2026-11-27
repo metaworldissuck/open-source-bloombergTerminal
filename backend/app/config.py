@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     version: str = "0.1.0"
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
     duckdb_filename: str = "openterm.duckdb"
-    enable_live_adapters: bool = False  # Set True to query yfinance/SEC/AkShare/CCXT live
+    enable_live_adapters: bool = True  # Queries live yfinance/SEC/AkShare/CCXT/EastMoney adapters
     adapter_timeout_sec: float = 4.0
     ohlcv_cache_ttl_sec: int = 300
     quote_cache_ttl_sec: int = 10
