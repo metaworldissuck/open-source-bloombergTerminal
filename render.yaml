@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: openterm-terminal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /v1/health
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: OPENTERM_ENABLE_LIVE_ADAPTERS
+        value: "true"

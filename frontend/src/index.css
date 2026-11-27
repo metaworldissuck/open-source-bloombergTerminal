@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+:root {
+  --bg-canvas: #070a0f;
+  --bg-surface: #0d121a;
+  --bg-elevated: #141b26;
+  --bg-hover: #1a2332;
+  --border-hairline: #1f2a3c;
+  --border-strong: #2d3c54;
+  --text-primary: #e4eaf3;
+  --text-secondary: #93a3b8;
+  --text-muted: #5d6f87;
+  --accent-amber: #f59e0b;
+  --accent-cyan: #38bdf8;
+  --accent-gain: #10b981;
+  --accent-loss: #f43f5e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Crisp institutional scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-canvas);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #243146;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #364966;
+}
+
+/* Dense table styling */
+.term-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.term-table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #0f1621;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.term-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #161f2e;
+  white-space: nowrap;
+}
+
+.term-table tbody tr:hover {
+  background-color: rgba(56, 189, 248, 0.05);
+}
+
+.pane-surface {
+  background: linear-gradient(180deg, #0d121a 0%, #0a0e15 100%);
+  border: 1px solid var(--border-hairline);
+}
+
+.pane-active {
+  border-color: rgba(245, 158, 11, 0.65);
+}
